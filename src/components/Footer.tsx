@@ -30,7 +30,7 @@ export default function Footer() {
                 <Send size={18} strokeWidth={2.5} />
               </span>
               <span className="font-display text-lg font-bold text-white">
-                Manda<span className="text-gradient">Más</span>
+                Luk<span className="text-gradient">ea</span>
               </span>
             </a>
             <p className="mt-4 max-w-xs text-sm leading-relaxed text-white/45">
@@ -74,13 +74,17 @@ export default function Footer() {
         </div>
 
         <div className="mt-16 flex flex-col items-center justify-between gap-4 border-t border-white/5 pt-8 text-xs text-white/35 sm:flex-row">
-          <p>© {new Date().getFullYear()} MandaMás. Todos los derechos reservados.</p>
+          <p>© {new Date().getFullYear()} Lukea. Todos los derechos reservados.</p>
           <div className="flex gap-6">
             <a href="#" className="hover:text-white/60">Privacidad</a>
             <a href="#" className="hover:text-white/60">Términos</a>
             <a href="#" className="hover:text-white/60">Licencias</a>
           </div>
         </div>
+
+        <p className="mt-6 text-center text-xs font-medium text-white/40">
+          Made in the US 🇺🇸 · hecho para latinos, con ❤️
+        </p>
       </div>
     </footer>
   );

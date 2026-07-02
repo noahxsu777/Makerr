@@ -29,6 +29,62 @@ function truncate(value, max = 480) {
   return typeof value === "string" ? value.slice(0, max) : "";
 }
 
+// --- Tasas de cambio en vivo ---------------------------------------------
+// Fuente: exchangerate-api.com (endpoint "open", gratis, sin API key).
+// Le restamos FX_MARGIN al valor de mercado antes de mostrarlo: esa
+// diferencia es el margen de Lukea. El cliente nunca ve la tasa cruda.
+const RATES_SOURCE_URL = "https://open.er-api.com/v6/latest/USD";
+const RATES_TTL_MS = 10 * 60 * 1000; // 10 minutos
+const FX_MARGIN = 0.005; // 0.5%
+
+const SUPPORTED_CURRENCIES = [
+  "MXN",
+  "GTQ",
+  "COP",
+  "HNL",
+  "DOP",
+  "PEN",
+  "NIO",
+  "BOB",
+  "VES",
+  "BRL",
+  "ARS",
+  "PHP",
+  "INR",
+  "VND",
+];
+
+let ratesCache = { data: null, fetchedAt: 0 };
+
+async function getLiveRates() {
+  const now = Date.now();
+  if (ratesCache.data && now - ratesCache.fetchedAt < RATES_TTL_MS) {
+    return ratesCache.data;
+  }
+
+  const res = await fetch(RATES_SOURCE_URL);
+  if (!res.ok) {
+    throw new Error(`La API de tasas respondió ${res.status}`);
+  }
+  const json = await res.json();
+  const marketRates = json?.rates;
+  if (!marketRates || typeof marketRates !== "object") {
+    throw new Error("Respuesta inválida de la API de tasas");
+  }
+
+  const rates = {};
+  for (const code of SUPPORTED_CURRENCIES) {
+    const marketRate = marketRates[code];
+    if (typeof marketRate === "number") {
+      rates[code] = Math.round(marketRate * (1 - FX_MARGIN) * 10000) / 10000;
+    }
+  }
+
+  const data = { rates, marginApplied: FX_MARGIN, updatedAt: new Date().toISOString() };
+  ratesCache = { data, fetchedAt: now };
+  return data;
+}
+
 app.post("/api/create-payment-intent", async (req, res) => {
   if (!stripe) {
     return res.status(503).json({
@@ -85,6 +141,16 @@ app.post("/api/create-payment-intent", async (req, res) => {
   } catch (err) {
     console.error("[server] Error creando el PaymentIntent:", err.message);
     res.status(500).json({ error: "No se pudo iniciar el pago. Intenta de nuevo." });
+  }
+});
+
+app.get("/api/rates", async (_req, res) => {
+  try {
+    const data = await getLiveRates();
+    res.json(data);
+  } catch (err) {
+    console.error("[server] Error obteniendo tasas de cambio en vivo:", err.message);
+    res.status(502).json({ error: "No se pudieron obtener las tasas de cambio en vivo." });
   }
 });
 

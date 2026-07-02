@@ -1,10 +1,16 @@
 import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { ChevronDown, Zap, ShieldCheck, Clock3, Receipt } from "lucide-react";
-import { countries } from "../lib/data";
+import { ChevronDown, Zap, ShieldCheck, Clock3, Receipt, Radio, WifiOff } from "lucide-react";
+import { countries, type Country } from "../lib/data";
 import { getTransferFee, MAX_SEND_USD, MIN_SEND_USD } from "../lib/fees";
+import { useLiveRates } from "../lib/useLiveRates";
 import AnimatedNumber from "./AnimatedNumber";
 import CheckoutModal from "./CheckoutModal";
+
+function getRate(country: Country, liveRates: Record<string, number> | null): number {
+  if (country.currency === "USD") return 1;
+  return liveRates?.[country.currency] ?? country.rate;
+}
 
 const deliverySpeeds = [
   { label: "Billetera móvil", time: "~2 min", icon: Zap },
@@ -19,11 +25,12 @@ export default function Calculator() {
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const country = countries[countryIdx];
   const delivery = deliverySpeeds[deliveryIdx];
+  const { rates: liveRates, loading: ratesLoading, error: ratesError } = useLiveRates();
 
-  const received = useMemo(
-    () => amount * country.rate,
-    [amount, country.rate]
-  );
+  const rate = getRate(country, liveRates);
+  const isLive = country.currency !== "USD" && Boolean(liveRates?.[country.currency]);
+
+  const received = useMemo(() => amount * rate, [amount, rate]);
 
   const fee = getTransferFee(amount);
   const total = amount + fee;
@@ -105,7 +112,22 @@ export default function Calculator() {
                   <AnimatedNumber value={received} decimals={2} />
                 </span>
               </div>
-              <div className="relative mt-5">
+              <div className="mt-1.5 flex items-center gap-1.5 text-[11px]">
+                {ratesLoading ? (
+                  <span className="text-white/35">Buscando tasas en vivo…</span>
+                ) : isLive ? (
+                  <span className="flex items-center gap-1 text-emerald-400">
+                    <Radio size={11} />
+                    Tasa en vivo
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1 text-white/35" title={ratesError ?? undefined}>
+                    <WifiOff size={11} />
+                    Tasa de respaldo
+                  </span>
+                )}
+              </div>
+              <div className="relative mt-4">
                 <select
                   value={countryIdx}
                   onChange={(e) => setCountryIdx(Number(e.target.value))}
@@ -113,7 +135,7 @@ export default function Calculator() {
                 >
                   {countries.map((c, i) => (
                     <option key={c.name} value={i}>
-                      {c.flag} {c.name} · tasa {c.rate}
+                      {c.flag} {c.name} · tasa {getRate(c, liveRates).toLocaleString("en-US")}
                     </option>
                   ))}
                 </select>
@@ -144,7 +166,7 @@ export default function Calculator() {
               </span>
             </div>
             <p className="mt-3 text-[11px] leading-relaxed text-white/35">
-              $2.99 USD en envíos hasta $1,000 · $15.00 USD en envíos hasta $2,500. Tasa: 1 USD = {country.rate.toLocaleString("en-US")}{" "}
+              $2.99 USD en envíos hasta $1,000 · $15.00 USD en envíos hasta $2,500. Tasa: 1 USD = {rate.toLocaleString("en-US")}{" "}
               {country.name === "Ecuador" || country.name === "El Salvador"
                 ? "USD"
                 : "moneda local"}

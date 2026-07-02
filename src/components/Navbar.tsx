@@ -41,7 +41,7 @@ export default function Navbar() {
               <Send size={18} strokeWidth={2.5} />
             </span>
             <span className="font-display text-lg font-bold tracking-tight text-white">
-              Manda<span className="text-gradient">Más</span>
+              Luk<span className="text-gradient">ea</span>
             </span>
           </a>
 
