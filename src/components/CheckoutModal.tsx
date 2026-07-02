@@ -40,6 +40,9 @@ const emptyRecipient: Recipient = {
   email: "",
   reference: "",
   bankName: "",
+  accountType: "",
+  documentType: "",
+  documentNumber: "",
 };
 
 const appearance = {
@@ -247,6 +250,9 @@ export default function CheckoutModal({
         recipientEmail: recipientData.email,
         recipientReference: recipientData.reference,
         recipientBank: recipientData.bankName,
+        recipientAccountType: recipientData.accountType,
+        recipientDocumentType: recipientData.documentType,
+        recipientDocumentNumber: recipientData.documentNumber,
       }),
     })
       .then(async (res) => {
@@ -353,6 +359,7 @@ export default function CheckoutModal({
                     ¿Quién recibe el dinero?
                   </h3>
                   <RecipientForm
+                    countryName={country.name}
                     deliveryLabel={deliveryLabel}
                     initialValues={recipient}
                     onSubmit={startPayment}

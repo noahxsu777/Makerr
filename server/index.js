@@ -46,6 +46,9 @@ app.post("/api/create-payment-intent", async (req, res) => {
     recipientEmail,
     recipientReference,
     recipientBank,
+    recipientAccountType,
+    recipientDocumentType,
+    recipientDocumentNumber,
   } = req.body ?? {};
 
   if (typeof amount !== "number" || amount < MIN_AMOUNT || amount > MAX_AMOUNT) {
@@ -72,6 +75,9 @@ app.post("/api/create-payment-intent", async (req, res) => {
         recipientEmail: truncate(recipientEmail),
         recipientReference: truncate(recipientReference),
         recipientBank: truncate(recipientBank),
+        recipientAccountType: truncate(recipientAccountType),
+        recipientDocumentType: truncate(recipientDocumentType),
+        recipientDocumentNumber: truncate(recipientDocumentNumber),
       },
     });
 
