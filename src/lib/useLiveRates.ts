@@ -26,11 +26,17 @@ export function useLiveRates() {
 
     fetch("/api/rates")
       .then(async (res) => {
-        const data = (await res.json()) as RatesResponse | { error: string };
+        const data = (await res.json()) as
+          | RatesResponse
+          | { error: string; detail?: string };
         if (!res.ok || !("rates" in data)) {
-          throw new Error(
-            "error" in data ? data.error : "No se pudieron obtener las tasas."
-          );
+          const message =
+            "error" in data
+              ? data.detail
+                ? `${data.error} (${data.detail})`
+                : data.error
+              : "No se pudieron obtener las tasas.";
+          throw new Error(message);
         }
         if (!cancelled) {
           setState({
@@ -43,7 +49,14 @@ export function useLiveRates() {
       })
       .catch((e: Error) => {
         if (!cancelled) {
-          setState((s) => ({ ...s, loading: false, error: e.message }));
+          const message =
+            e instanceof TypeError
+              ? "No se pudo conectar con el servidor (¿está corriendo `npm run server` o `npm run dev:all`?)."
+              : e.message;
+          setState((s) => ({ ...s, loading: false, error: message }));
+          if (import.meta.env.DEV) {
+            console.warn("[useLiveRates] usando tasas de respaldo:", message);
+          }
         }
       });
 

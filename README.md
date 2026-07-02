@@ -23,15 +23,29 @@ con Stripe (tarjeta o cuenta bancaria vía ACH).
 
 ## Tasas de cambio en vivo
 
-El backend (`GET /api/rates`) consulta [exchangerate-api.com](https://www.exchangerate-api.com/)
-(endpoint público, sin API key) para obtener tasas en tiempo real y les resta
+El backend (`GET /api/rates`) consulta dos fuentes públicas de tasas en tiempo
+real, sin API key (si la primera falla, intenta con la segunda), y les resta
 un margen de **0.5%** antes de devolverlas — esa diferencia es el margen de
-Lukea, y el cliente nunca ve la tasa de mercado cruda. Las tasas se
-cachean 10 minutos en el servidor para no golpear la API en cada request.
+Lukea, y el cliente nunca ve la tasa de mercado cruda. Las tasas se cachean 10
+minutos en el servidor para no golpear las APIs en cada request; si ambas
+fuentes fallan pero ya había un valor cacheado, se sigue sirviendo ese en vez
+de romper la calculadora.
 
-Si la API externa no responde (o no tienes conexión a internet saliente),
-la calculadora usa automáticamente las tasas de respaldo definidas en
-`src/lib/data.ts` y lo indica con un aviso de "Tasa de respaldo".
+Si ninguna fuente responde (o no hay salida a internet), la calculadora usa
+automáticamente las tasas de respaldo definidas en `src/lib/data.ts` y lo
+indica con un aviso de "Tasa de respaldo" — con el motivo exacto debajo, para
+poder diagnosticarlo.
+
+**Si siempre ves "Tasa de respaldo" y nunca "Tasa en vivo":** lo más común es
+que el backend no esté corriendo. `npm run dev` sólo levanta el frontend; para
+que `/api/rates` funcione en desarrollo necesitas `npm run dev:all` (o
+`npm run server` en otra terminal). Puedes confirmar que el backend está vivo
+y qué está pasando con las tasas en `http://localhost:8787/api/health` y
+`http://localhost:8787/api/rates`.
+
+Para producción, corre `npm run build` y luego `npm run server`: el mismo
+proceso de Express sirve el frontend compilado (`dist/`) *y* las rutas
+`/api/*` en un solo puerto, así que no hace falta configurar un proxy aparte.
 
 ## Configurar Stripe
 
@@ -62,4 +76,13 @@ npm run lint      # oxlint
 ```
 
 También puedes correr cada proceso por separado con `npm run dev` (frontend)
-y `npm run server` (API de Stripe + tasas de cambio).
+y `npm run server` (API de Stripe + tasas de cambio) — pero si solo corres
+`npm run dev`, la calculadora no tendrá backend con quien hablar y siempre
+mostrará las tasas de respaldo.
+
+Para "producción" local (un solo proceso, un solo puerto):
+
+```bash
+npm run build
+npm run server   # sirve dist/ y /api/* juntos en http://localhost:8787
+```

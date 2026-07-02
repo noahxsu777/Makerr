@@ -1,7 +1,13 @@
 import "dotenv/config";
+import path from "node:path";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import express from "express";
 import cors from "cors";
 import Stripe from "stripe";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const distDir = path.join(__dirname, "..", "dist");
 
 const { STRIPE_SECRET_KEY, PORT = 8787 } = process.env;
 
@@ -30,10 +36,28 @@ function truncate(value, max = 480) {
 }
 
 // --- Tasas de cambio en vivo ---------------------------------------------
-// Fuente: exchangerate-api.com (endpoint "open", gratis, sin API key).
-// Le restamos FX_MARGIN al valor de mercado antes de mostrarlo: esa
-// diferencia es el margen de Lukea. El cliente nunca ve la tasa cruda.
-const RATES_SOURCE_URL = "https://open.er-api.com/v6/latest/USD";
+// Fuentes gratuitas, sin API key. Probamos la primera y, si falla, la
+// segunda antes de rendirnos. Le restamos FX_MARGIN al valor de mercado
+// antes de mostrarlo: esa diferencia es el margen de Lukea. El cliente
+// nunca ve la tasa cruda.
+const RATES_SOURCES = [
+  {
+    url: "https://open.er-api.com/v6/latest/USD",
+    parse: (json) => json?.rates,
+  },
+  {
+    url: "https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json",
+    parse: (json) => {
+      const raw = json?.usd;
+      if (!raw) return null;
+      // esta fuente usa códigos en minúscula (mxn, cop, ...)
+      return Object.fromEntries(
+        Object.entries(raw).map(([code, value]) => [code.toUpperCase(), value])
+      );
+    },
+  },
+];
+
 const RATES_TTL_MS = 10 * 60 * 1000; // 10 minutos
 const FX_MARGIN = 0.005; // 0.5%
 
@@ -56,33 +80,59 @@ const SUPPORTED_CURRENCIES = [
 
 let ratesCache = { data: null, fetchedAt: 0 };
 
+async function fetchMarketRates() {
+  const errors = [];
+  for (const source of RATES_SOURCES) {
+    try {
+      const res = await fetch(source.url, { signal: AbortSignal.timeout(8000) });
+      if (!res.ok) throw new Error(`respondió ${res.status}`);
+      const json = await res.json();
+      const marketRates = source.parse(json);
+      if (!marketRates || typeof marketRates !== "object") {
+        throw new Error("respuesta con formato inesperado");
+      }
+      return marketRates;
+    } catch (err) {
+      errors.push(`${source.url} → ${err.message}`);
+    }
+  }
+  throw new Error(`Ninguna fuente de tasas respondió (${errors.join("; ")})`);
+}
+
 async function getLiveRates() {
   const now = Date.now();
   if (ratesCache.data && now - ratesCache.fetchedAt < RATES_TTL_MS) {
     return ratesCache.data;
   }
 
-  const res = await fetch(RATES_SOURCE_URL);
-  if (!res.ok) {
-    throw new Error(`La API de tasas respondió ${res.status}`);
-  }
-  const json = await res.json();
-  const marketRates = json?.rates;
-  if (!marketRates || typeof marketRates !== "object") {
-    throw new Error("Respuesta inválida de la API de tasas");
-  }
+  try {
+    const marketRates = await fetchMarketRates();
 
-  const rates = {};
-  for (const code of SUPPORTED_CURRENCIES) {
-    const marketRate = marketRates[code];
-    if (typeof marketRate === "number") {
-      rates[code] = Math.round(marketRate * (1 - FX_MARGIN) * 10000) / 10000;
+    const rates = {};
+    for (const code of SUPPORTED_CURRENCIES) {
+      const marketRate = marketRates[code];
+      if (typeof marketRate === "number") {
+        rates[code] = Math.round(marketRate * (1 - FX_MARGIN) * 10000) / 10000;
+      }
     }
-  }
+    if (Object.keys(rates).length === 0) {
+      throw new Error("la respuesta no trajo ninguna de las monedas soportadas");
+    }
 
-  const data = { rates, marginApplied: FX_MARGIN, updatedAt: new Date().toISOString() };
-  ratesCache = { data, fetchedAt: now };
-  return data;
+    const data = { rates, marginApplied: FX_MARGIN, updatedAt: new Date().toISOString() };
+    ratesCache = { data, fetchedAt: now };
+    return data;
+  } catch (err) {
+    // Si ya teníamos un valor bueno (aunque esté vencido), lo seguimos
+    // sirviendo en vez de romper la calculadora del usuario.
+    if (ratesCache.data) {
+      console.warn(
+        `[server] No se pudieron refrescar las tasas, sirviendo el último valor cacheado: ${err.message}`
+      );
+      return ratesCache.data;
+    }
+    throw err;
+  }
 }
 
 app.post("/api/create-payment-intent", async (req, res) => {
@@ -150,13 +200,32 @@ app.get("/api/rates", async (_req, res) => {
     res.json(data);
   } catch (err) {
     console.error("[server] Error obteniendo tasas de cambio en vivo:", err.message);
-    res.status(502).json({ error: "No se pudieron obtener las tasas de cambio en vivo." });
+    res.status(502).json({
+      error: "No se pudieron obtener las tasas de cambio en vivo.",
+      detail: err.message,
+    });
   }
 });
 
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, stripeConfigured: Boolean(stripe) });
+  res.json({
+    ok: true,
+    stripeConfigured: Boolean(stripe),
+    ratesCached: Boolean(ratesCache.data),
+    ratesFetchedAt: ratesCache.fetchedAt ? new Date(ratesCache.fetchedAt).toISOString() : null,
+  });
 });
+
+// Sirve el frontend ya compilado (`npm run build`) para que un solo proceso
+// atienda tanto la app como /api/*. Si no existe dist/ (por ejemplo en modo
+// `npm run dev`, donde Vite sirve el frontend con su propio proxy a /api),
+// esto simplemente no hace nada.
+if (existsSync(distDir)) {
+  app.use(express.static(distDir));
+  app.get(/^(?!\/api\/).*/, (_req, res) => {
+    res.sendFile(path.join(distDir, "index.html"));
+  });
+}
 
 app.listen(PORT, () => {
   console.log(`[server] Escuchando en http://localhost:${PORT}`);

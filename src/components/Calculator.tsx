@@ -127,6 +127,11 @@ export default function Calculator() {
                   </span>
                 )}
               </div>
+              {!ratesLoading && !isLive && ratesError && (
+                <p className="mt-1 text-[10px] leading-tight text-white/25">
+                  {ratesError}
+                </p>
+              )}
               <div className="relative mt-4">
                 <select
                   value={countryIdx}
