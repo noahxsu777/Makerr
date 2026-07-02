@@ -125,7 +125,7 @@ export const testimonials = [
 export const faqs = [
   {
     q: "¿Cuánto cuesta enviar dinero?",
-    a: "La mayoría de los envíos a cuentas bancarias o billeteras móviles no tienen comisión de envío; solo pagas el margen incluido en la tasa de cambio, que siempre se muestra por adelantado antes de confirmar.",
+    a: "Un costo fijo y transparente: $2.99 USD para envíos hasta $1,000 USD, y $15 USD para envíos de hasta $2,500 USD. Sin comisiones escondidas ni sorpresas: el total se muestra antes de pagar.",
   },
   {
     q: "¿Qué tan rápido llega el dinero?",

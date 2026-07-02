@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { ChevronDown, Zap, ShieldCheck, Clock3 } from "lucide-react";
+import { ChevronDown, Zap, ShieldCheck, Clock3, Receipt } from "lucide-react";
 import { countries } from "../lib/data";
+import { getTransferFee, MAX_SEND_USD, MIN_SEND_USD } from "../lib/fees";
 import AnimatedNumber from "./AnimatedNumber";
 import CheckoutModal from "./CheckoutModal";
 
@@ -24,7 +25,9 @@ export default function Calculator() {
     [amount, country.rate]
   );
 
-  const canContinue = amount >= 10 && amount <= 10000;
+  const fee = getTransferFee(amount);
+  const total = amount + fee;
+  const canContinue = amount >= MIN_SEND_USD && amount <= MAX_SEND_USD;
 
   return (
     <section id="calculadora" className="relative py-24 sm:py-32">
@@ -67,8 +70,8 @@ export default function Calculator() {
                 </span>
                 <input
                   type="number"
-                  min={10}
-                  max={10000}
+                  min={MIN_SEND_USD}
+                  max={MAX_SEND_USD}
                   value={amount}
                   onChange={(e) => setAmount(Number(e.target.value) || 0)}
                   className="w-full bg-transparent font-display text-3xl font-bold text-white outline-none"
@@ -79,13 +82,18 @@ export default function Calculator() {
               </div>
               <input
                 type="range"
-                min={10}
-                max={2000}
+                min={MIN_SEND_USD}
+                max={MAX_SEND_USD}
                 step={10}
-                value={Math.min(amount, 2000)}
+                value={Math.min(amount, MAX_SEND_USD)}
                 onChange={(e) => setAmount(Number(e.target.value))}
                 className="mt-5 h-1.5 w-full cursor-pointer appearance-none rounded-full bg-white/10 accent-lime-400"
               />
+              {!canContinue && (
+                <p className="mt-3 text-xs text-lime-300/80">
+                  Elige un monto entre ${MIN_SEND_USD} y ${MAX_SEND_USD.toLocaleString("en-US")} USD.
+                </p>
+              )}
             </div>
 
             <div className="rounded-2xl border border-lime-400/25 bg-lime-400/[0.05] p-5">
@@ -117,17 +125,30 @@ export default function Calculator() {
             </div>
           </div>
 
-          <div className="relative mt-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl bg-white/[0.03] px-5 py-4">
-            <div className="flex items-center gap-2 text-sm text-white/50">
-              <Zap size={15} className="text-lime-300" />
-              0% comisión de envío para este monto
+          <div className="relative mt-6 rounded-2xl bg-white/[0.03] px-5 py-4">
+            <div className="flex items-center justify-between text-sm text-white/50">
+              <span>Envías</span>
+              <span className="font-medium text-white">${amount.toFixed(2)}</span>
             </div>
-            <span className="text-sm font-semibold text-white/70">
-              Tasa: 1 USD = {country.rate.toLocaleString("en-US")}{" "}
+            <div className="mt-2 flex items-center justify-between text-sm text-white/50">
+              <span className="flex items-center gap-1.5">
+                <Receipt size={14} className="text-lime-300" />
+                Costo de envío
+              </span>
+              <span className="font-medium text-white">${fee.toFixed(2)}</span>
+            </div>
+            <div className="mt-3 flex items-center justify-between border-t border-white/10 pt-3">
+              <span className="text-sm font-semibold text-white/70">Total a pagar</span>
+              <span className="font-display text-lg font-bold text-lime-300">
+                ${total.toFixed(2)}
+              </span>
+            </div>
+            <p className="mt-3 text-[11px] leading-relaxed text-white/35">
+              $2.99 USD en envíos hasta $1,000 · $15.00 USD en envíos hasta $2,500. Tasa: 1 USD = {country.rate.toLocaleString("en-US")}{" "}
               {country.name === "Ecuador" || country.name === "El Salvador"
                 ? "USD"
                 : "moneda local"}
-            </span>
+            </p>
           </div>
 
           <p className="relative mt-6 text-xs font-semibold uppercase tracking-wide text-white/40">
@@ -182,6 +203,8 @@ export default function Calculator() {
         open={checkoutOpen}
         onClose={() => setCheckoutOpen(false)}
         amountUsd={amount}
+        feeUsd={fee}
+        totalUsd={total}
         receivedAmount={received}
         country={country}
         deliveryLabel={delivery.label}

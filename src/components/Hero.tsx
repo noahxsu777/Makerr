@@ -151,7 +151,7 @@ export default function Hero() {
               <div className="mt-5 flex items-center justify-between text-xs text-white/40">
                 <span className="flex items-center gap-1.5">
                   <TrendingUp size={13} className="text-emerald-400" />
-                  Tasa 18.42 · 0% comisión
+                  Tasa 18.42 · Envío desde $2.99
                 </span>
                 <ShieldCheck size={14} className="text-white/30" />
               </div>
