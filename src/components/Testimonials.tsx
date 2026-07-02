@@ -32,7 +32,7 @@ export default function Testimonials() {
           transition={{ duration: 0.6 }}
           className="mb-12 text-center"
         >
-          <span className="text-xs font-semibold uppercase tracking-[0.2em] text-coral-400">
+          <span className="text-xs font-semibold uppercase tracking-[0.2em] text-lime-300">
             Historias reales
           </span>
           <h2 className="mt-3 font-display text-3xl font-bold text-white sm:text-4xl">

@@ -6,7 +6,7 @@ export default function AppCTA() {
     <section className="relative overflow-hidden py-24 sm:py-32">
       <div
         aria-hidden
-        className="animate-blob absolute left-1/2 top-0 h-[28rem] w-[28rem] -translate-x-1/2 bg-violet-500/15 blur-[110px]"
+        className="animate-blob absolute left-1/2 top-0 h-[28rem] w-[28rem] -translate-x-1/2 bg-emerald-500/15 blur-[110px]"
       />
 
       <div className="relative mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
@@ -86,7 +86,7 @@ export default function AppCTA() {
                   Tu último envío llegó hace 2 días
                 </div>
 
-                <div className="mt-5 rounded-2xl bg-gradient-to-br from-lime-400/20 to-violet-400/10 p-4 ring-1 ring-white/10">
+                <div className="mt-5 rounded-2xl bg-gradient-to-br from-lime-400/20 to-emerald-400/10 p-4 ring-1 ring-white/10">
                   <div className="flex items-center justify-between text-[10px] text-white/50">
                     <span>Envío rápido</span>
                     <ArrowRightLeft size={12} />
@@ -100,7 +100,7 @@ export default function AppCTA() {
                       whileInView={{ width: "78%" }}
                       viewport={{ once: true }}
                       transition={{ duration: 1.2, delay: 0.4, ease: "easeOut" }}
-                      className="h-full rounded-full bg-gradient-to-r from-lime-400 to-aqua-400"
+                      className="h-full rounded-full bg-gradient-to-r from-lime-400 to-emerald-400"
                     />
                   </div>
                   <div className="mt-1.5 text-[10px] text-white/40">

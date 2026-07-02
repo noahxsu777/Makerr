@@ -26,7 +26,7 @@ export default function Footer() {
         <div className="grid gap-12 lg:grid-cols-[1.4fr_2fr]">
           <div>
             <a href="#top" className="flex items-center gap-2">
-              <span className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-lime-400 via-violet-400 to-aqua-400 text-ink-950">
+              <span className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-lime-400 via-emerald-400 to-emerald-400 text-ink-950">
                 <Send size={18} strokeWidth={2.5} />
               </span>
               <span className="font-display text-lg font-bold text-white">

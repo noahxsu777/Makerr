@@ -5,16 +5,24 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "server": "node server/index.js",
+    "dev:all": "concurrently -n web,api -c cyan,green \"npm:dev\" \"npm:server\"",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@stripe/react-stripe-js": "^6.7.0",
+    "@stripe/stripe-js": "^9.9.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
     "framer-motion": "^12.42.2",
     "lucide-react": "^1.23.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "react-router-dom": "^7.18.1"
+    "react-router-dom": "^7.18.1",
+    "stripe": "^22.3.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.2",
@@ -23,6 +31,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
     "autoprefixer": "^10.5.2",
+    "concurrently": "^10.0.3",
     "oxlint": "^1.71.0",
     "postcss": "^8.5.16",
     "tailwindcss": "^4.3.2",

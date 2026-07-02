@@ -37,7 +37,7 @@ export default function Navbar() {
           }`}
         >
           <a href="#top" className="flex items-center gap-2 group">
-            <span className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-lime-400 via-violet-400 to-aqua-400 text-ink-950 shadow-lg shadow-violet-500/20 transition-transform duration-300 group-hover:rotate-12">
+            <span className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-lime-400 via-emerald-400 to-emerald-400 text-ink-950 shadow-lg shadow-emerald-500/20 transition-transform duration-300 group-hover:rotate-12">
               <Send size={18} strokeWidth={2.5} />
             </span>
             <span className="font-display text-lg font-bold tracking-tight text-white">

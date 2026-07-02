@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { ChevronDown, Zap, ShieldCheck, Clock3 } from "lucide-react";
 import { countries } from "../lib/data";
 import AnimatedNumber from "./AnimatedNumber";
+import CheckoutModal from "./CheckoutModal";
 
 const deliverySpeeds = [
   { label: "Billetera móvil", time: "~2 min", icon: Zap },
@@ -13,12 +14,17 @@ const deliverySpeeds = [
 export default function Calculator() {
   const [amount, setAmount] = useState(500);
   const [countryIdx, setCountryIdx] = useState(0);
+  const [deliveryIdx, setDeliveryIdx] = useState(0);
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
   const country = countries[countryIdx];
+  const delivery = deliverySpeeds[deliveryIdx];
 
   const received = useMemo(
     () => amount * country.rate,
     [amount, country.rate]
   );
+
+  const canContinue = amount >= 10 && amount <= 10000;
 
   return (
     <section id="calculadora" className="relative py-24 sm:py-32">
@@ -47,7 +53,7 @@ export default function Calculator() {
         >
           <div
             aria-hidden
-            className="pointer-events-none absolute -top-24 right-0 h-72 w-72 rounded-full bg-violet-500/20 blur-[90px]"
+            className="pointer-events-none absolute -top-24 right-0 h-72 w-72 rounded-full bg-emerald-500/20 blur-[90px]"
           />
 
           <div className="relative grid gap-6 sm:grid-cols-2">
@@ -124,30 +130,62 @@ export default function Calculator() {
             </span>
           </div>
 
-          <div className="relative mt-6 grid gap-3 sm:grid-cols-3">
-            {deliverySpeeds.map((d) => (
-              <div
-                key={d.label}
-                className="flex items-center gap-3 rounded-xl border border-white/10 px-4 py-3"
-              >
-                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-white/5 text-aqua-400">
-                  <d.icon size={15} />
-                </span>
-                <div>
-                  <div className="text-xs font-semibold text-white/80">
-                    {d.label}
+          <p className="relative mt-6 text-xs font-semibold uppercase tracking-wide text-white/40">
+            Elige forma de entrega
+          </p>
+          <div className="relative mt-3 grid gap-3 sm:grid-cols-3">
+            {deliverySpeeds.map((d, i) => {
+              const selected = i === deliveryIdx;
+              return (
+                <button
+                  key={d.label}
+                  type="button"
+                  onClick={() => setDeliveryIdx(i)}
+                  className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-left transition-colors ${
+                    selected
+                      ? "border-lime-400/50 bg-lime-400/10"
+                      : "border-white/10 hover:border-white/20"
+                  }`}
+                >
+                  <span
+                    className={`grid h-8 w-8 shrink-0 place-items-center rounded-full ${
+                      selected
+                        ? "bg-lime-400/20 text-lime-300"
+                        : "bg-white/5 text-emerald-400"
+                    }`}
+                  >
+                    <d.icon size={15} />
+                  </span>
+                  <div>
+                    <div className="text-xs font-semibold text-white/80">
+                      {d.label}
+                    </div>
+                    <div className="text-[11px] text-white/40">{d.time}</div>
                   </div>
-                  <div className="text-[11px] text-white/40">{d.time}</div>
-                </div>
-              </div>
-            ))}
+                </button>
+              );
+            })}
           </div>
 
-          <button className="relative mt-7 w-full rounded-full bg-gradient-to-r from-lime-400 via-lime-300 to-aqua-400 py-4 font-display text-base font-bold text-ink-950 transition-transform hover:scale-[1.01] active:scale-[0.99]">
+          <button
+            type="button"
+            disabled={!canContinue}
+            onClick={() => setCheckoutOpen(true)}
+            className="relative mt-7 w-full rounded-full bg-gradient-to-r from-lime-400 via-lime-300 to-emerald-400 py-4 font-display text-base font-bold text-ink-950 transition-transform hover:scale-[1.01] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:scale-100"
+          >
             Continuar con este envío
           </button>
         </motion.div>
       </div>
+
+      <CheckoutModal
+        open={checkoutOpen}
+        onClose={() => setCheckoutOpen(false)}
+        amountUsd={amount}
+        receivedAmount={received}
+        country={country}
+        deliveryLabel={delivery.label}
+      />
     </section>
   );
 }

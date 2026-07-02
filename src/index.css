@@ -1,21 +1,20 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Sora", system-ui, "Segoe UI", Roboto, sans-serif;
-  --font-display: "Sora", system-ui, sans-serif;
+  --font-sans: "Plus Jakarta Sans", system-ui, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Bricolage Grotesque", system-ui, sans-serif;
 
-  --color-ink-950: #05070f;
-  --color-ink-900: #0a0e1a;
-  --color-ink-800: #10162a;
-  --color-ink-700: #171f38;
-  --color-ink-600: #232c4c;
+  --color-ink-950: #050605;
+  --color-ink-900: #0a0d0a;
+  --color-ink-800: #10140f;
+  --color-ink-700: #171d16;
+  --color-ink-600: #232c20;
 
-  --color-lime-400: #c8ff4d;
-  --color-lime-300: #ddff8f;
-  --color-violet-500: #7c5cff;
-  --color-violet-400: #9d84ff;
-  --color-coral-400: #ff7a59;
-  --color-aqua-400: #45e8d1;
+  --color-lime-400: #b6ff2e;
+  --color-lime-300: #d3ff85;
+  --color-lime-200: #e9ffc0;
+  --color-emerald-500: #1e9e56;
+  --color-emerald-400: #2ec46b;
 
   --animate-marquee: marquee 28s linear infinite;
   --animate-float: float 6s ease-in-out infinite;
@@ -57,7 +56,7 @@ body {
 }
 
 .text-gradient {
-  background: linear-gradient(90deg, #c8ff4d 0%, #9d84ff 55%, #45e8d1 100%);
+  background: linear-gradient(90deg, #d3ff85 0%, #b6ff2e 55%, #2ec46b 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;

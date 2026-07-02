@@ -12,7 +12,7 @@ export default function HowItWorks() {
           transition={{ duration: 0.6 }}
           className="mx-auto max-w-2xl text-center"
         >
-          <span className="text-xs font-semibold uppercase tracking-[0.2em] text-violet-300">
+          <span className="text-xs font-semibold uppercase tracking-[0.2em] text-lime-300">
             Cómo funciona
           </span>
           <h2 className="mt-3 font-display text-3xl font-bold text-white sm:text-4xl">
@@ -33,7 +33,7 @@ export default function HowItWorks() {
               className="group relative"
             >
               <div className="glass relative h-full rounded-2xl p-6 transition-transform duration-300 hover:-translate-y-1.5">
-                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-lime-400/20 to-violet-400/20 font-display text-lg font-bold text-lime-300 ring-1 ring-white/10">
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-lime-400/20 to-emerald-400/20 font-display text-lg font-bold text-lime-300 ring-1 ring-white/10">
                   {s.n}
                 </div>
                 <h3 className="mt-5 font-display text-lg font-semibold text-white">

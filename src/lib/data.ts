@@ -28,19 +28,19 @@ export const deliveryOptions = [
     icon: "Wallet",
     title: "Billetera móvil",
     desc: "Nequi, Yape, Mercado Pago, DaviPlata y más de 30 wallets locales.",
-    accent: "violet",
+    accent: "emerald",
   },
   {
     icon: "Store",
     title: "Retiro en efectivo",
     desc: "Más de 55,000 puntos de pago en toda Latinoamérica y Asia.",
-    accent: "aqua",
+    accent: "moss",
   },
   {
     icon: "CreditCard",
     title: "Recarga de tarjeta débito",
     desc: "Fondos disponibles en segundos en tarjetas Visa y Mastercard.",
-    accent: "coral",
+    accent: "mint",
   },
   {
     icon: "Home",
@@ -52,19 +52,19 @@ export const deliveryOptions = [
     icon: "Smartphone",
     title: "Recarga de celular",
     desc: "Tiempo aire y datos para más de 180 operadores al instante.",
-    accent: "violet",
+    accent: "emerald",
   },
   {
     icon: "Receipt",
     title: "Pago de servicios",
     desc: "Luz, agua, gas e internet pagados directo desde la app.",
-    accent: "aqua",
+    accent: "moss",
   },
   {
     icon: "Bitcoin",
     title: "Retiro cripto",
     desc: "Convierte a USDC y retira a tu wallet favorita sin comisión extra.",
-    accent: "coral",
+    accent: "mint",
   },
 ] as const;
 

@@ -24,10 +24,10 @@ const icons: Record<string, LucideIcon> = {
 };
 
 const accentClasses: Record<string, string> = {
-  lime: "from-lime-400/20 to-lime-400/5 text-lime-300 ring-lime-400/20",
-  violet: "from-violet-400/20 to-violet-400/5 text-violet-300 ring-violet-400/20",
-  aqua: "from-aqua-400/20 to-aqua-400/5 text-aqua-400 ring-aqua-400/20",
-  coral: "from-coral-400/20 to-coral-400/5 text-coral-400 ring-coral-400/20",
+  lime: "from-lime-400/25 to-lime-400/5 text-lime-300 ring-lime-400/25",
+  emerald: "from-emerald-400/25 to-emerald-400/5 text-emerald-400 ring-emerald-400/25",
+  moss: "from-emerald-500/30 to-emerald-500/5 text-lime-200 ring-emerald-500/25",
+  mint: "from-lime-200/20 to-lime-200/5 text-lime-200 ring-lime-200/20",
 };
 
 export default function Features() {
@@ -45,7 +45,7 @@ export default function Features() {
           transition={{ duration: 0.6 }}
           className="mx-auto max-w-2xl text-center"
         >
-          <span className="text-xs font-semibold uppercase tracking-[0.2em] text-aqua-400">
+          <span className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-400">
             Más opciones, siempre
           </span>
           <h2 className="mt-3 font-display text-3xl font-bold text-white sm:text-4xl">

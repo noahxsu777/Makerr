@@ -12,7 +12,7 @@ export default function Hero() {
       {/* Ambient blobs */}
       <div
         aria-hidden
-        className="animate-blob absolute -top-32 -left-32 h-[26rem] w-[26rem] bg-violet-500/25 blur-[100px]"
+        className="animate-blob absolute -top-32 -left-32 h-[26rem] w-[26rem] bg-emerald-500/25 blur-[100px]"
       />
       <div
         aria-hidden
@@ -21,7 +21,7 @@ export default function Hero() {
       />
       <div
         aria-hidden
-        className="animate-blob absolute bottom-0 left-1/3 h-[20rem] w-[20rem] bg-aqua-400/15 blur-[100px]"
+        className="animate-blob absolute bottom-0 left-1/3 h-[20rem] w-[20rem] bg-emerald-400/15 blur-[100px]"
         style={{ animationDelay: "-8s" }}
       />
 
@@ -150,13 +150,13 @@ export default function Hero() {
 
               <div className="mt-5 flex items-center justify-between text-xs text-white/40">
                 <span className="flex items-center gap-1.5">
-                  <TrendingUp size={13} className="text-aqua-400" />
+                  <TrendingUp size={13} className="text-emerald-400" />
                   Tasa 18.42 · 0% comisión
                 </span>
                 <ShieldCheck size={14} className="text-white/30" />
               </div>
 
-              <button className="mt-5 w-full rounded-xl bg-gradient-to-r from-lime-400 via-lime-300 to-aqua-400 py-3.5 text-sm font-bold text-ink-950 transition-transform hover:scale-[1.02]">
+              <button className="mt-5 w-full rounded-xl bg-gradient-to-r from-lime-400 via-lime-300 to-emerald-400 py-3.5 text-sm font-bold text-ink-950 transition-transform hover:scale-[1.02]">
                 Confirmar envío
               </button>
             </div>
@@ -167,7 +167,7 @@ export default function Hero() {
               transition={{ delay: 0.9, duration: 0.6 }}
               className="glass absolute -left-8 top-8 hidden items-center gap-2 rounded-2xl px-4 py-3 shadow-lg sm:flex"
             >
-              <span className="grid h-8 w-8 place-items-center rounded-full bg-aqua-400/20 text-aqua-400">
+              <span className="grid h-8 w-8 place-items-center rounded-full bg-emerald-400/20 text-emerald-400">
                 <CheckCircle2 size={16} />
               </span>
               <div className="text-xs">
@@ -182,7 +182,7 @@ export default function Hero() {
               transition={{ delay: 1.1, duration: 0.6 }}
               className="glass absolute -right-10 -bottom-10 hidden rounded-2xl px-4 py-3 shadow-lg sm:block"
             >
-              <div className="text-xs font-semibold text-violet-300">
+              <div className="text-xs font-semibold text-lime-300">
                 +30 wallets locales
               </div>
               <div className="text-[11px] text-white/40">Nequi · Yape · DaviPlata</div>
