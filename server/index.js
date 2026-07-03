@@ -1,13 +1,17 @@
 import "dotenv/config";
 import path from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import cors from "cors";
+import multer from "multer";
 import Stripe from "stripe";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.join(__dirname, "..", "dist");
+const uploadsDir = path.join(__dirname, "uploads");
+mkdirSync(uploadsDir, { recursive: true });
 
 const { STRIPE_SECRET_KEY, PORT = 8787 } = process.env;
 
@@ -198,6 +202,73 @@ app.post("/api/create-payment-intent", async (req, res) => {
   }
 });
 
+// --- Pago manual con USDC (Solana) ---------------------------------------
+// No verificamos la transacción on-chain (eso requeriría correr un nodo o
+// pagar un indexador RPC). El flujo es: el usuario manda USDC a la wallet
+// de la app, sube una captura como comprobante, y queda en revisión manual.
+const cryptoUpload = multer({
+  storage: multer.diskStorage({
+    destination: uploadsDir,
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname).replace(/[^a-zA-Z0-9.]/g, "").slice(0, 10);
+      cb(null, `${randomUUID()}${ext}`);
+    },
+  }),
+  limits: { fileSize: 8 * 1024 * 1024 }, // 8 MB
+  fileFilter: (_req, file, cb) => {
+    if (!file.mimetype.startsWith("image/")) {
+      return cb(new Error("Solo se aceptan imágenes (captura de pantalla del pago)."));
+    }
+    cb(null, true);
+  },
+});
+
+app.post("/api/crypto-payment", cryptoUpload.single("proof"), (req, res) => {
+  const {
+    amount,
+    countryName,
+    deliveryMethod,
+    recipientName,
+    recipientPhone,
+    recipientEmail,
+    recipientReference,
+    recipientBank,
+    recipientAccountType,
+    recipientDocumentType,
+    recipientDocumentNumber,
+  } = req.body ?? {};
+
+  const amountNum = Number(amount);
+  if (!Number.isFinite(amountNum) || amountNum < MIN_AMOUNT || amountNum > MAX_AMOUNT) {
+    return res.status(400).json({
+      error: `El monto debe estar entre $${MIN_AMOUNT} y $${MAX_AMOUNT} USD.`,
+    });
+  }
+  if (!req.file) {
+    return res.status(400).json({ error: "Adjunta una captura del pago para continuar." });
+  }
+
+  const fee = getTransferFee(amountNum);
+  const total = Math.round((amountNum + fee) * 100) / 100;
+  const reference = randomUUID();
+
+  console.log(
+    `[server] Pago con USDC pendiente de revisión ${reference}: $${total} · ${truncate(recipientName)} · ${truncate(countryName)} · comprobante ${req.file.filename}`,
+    {
+      deliveryMethod: truncate(deliveryMethod),
+      recipientPhone: truncate(recipientPhone),
+      recipientEmail: truncate(recipientEmail),
+      recipientReference: truncate(recipientReference),
+      recipientBank: truncate(recipientBank),
+      recipientAccountType: truncate(recipientAccountType),
+      recipientDocumentType: truncate(recipientDocumentType),
+      recipientDocumentNumber: truncate(recipientDocumentNumber),
+    }
+  );
+
+  res.json({ reference, status: "pending_review", fee, total });
+});
+
 app.get("/api/rates", async (_req, res) => {
   try {
     const data = await getLiveRates();
@@ -230,6 +301,12 @@ if (existsSync(distDir)) {
     res.sendFile(path.join(distDir, "index.html"));
   });
 }
+
+// eslint-disable-next-line no-unused-vars
+app.use((err, _req, res, _next) => {
+  console.error("[server] Error no manejado:", err.message);
+  res.status(400).json({ error: err.message || "Ocurrió un error inesperado." });
+});
 
 app.listen(PORT, () => {
   console.log(`[server] Escuchando en http://localhost:${PORT}`);

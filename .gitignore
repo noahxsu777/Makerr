@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# Comprobantes de pago subidos por usuarios (contienen datos sensibles)
+server/uploads
+
 # Environment variables / secrets
 .env
 .env.*

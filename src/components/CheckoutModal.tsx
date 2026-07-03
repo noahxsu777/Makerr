@@ -11,13 +11,17 @@ import {
   X,
   Loader2,
   CheckCircle2,
+  Clock3,
   ShieldCheck,
   ServerCrash,
   ArrowLeft,
   Check,
+  CreditCard,
+  Coins,
 } from "lucide-react";
 import { isStripeConfigured, stripePromise } from "../lib/stripe";
 import RecipientForm, { type Recipient } from "./RecipientForm";
+import CryptoPayment from "./CryptoPayment";
 
 type Country = { name: string; flag: string };
 
@@ -32,7 +36,9 @@ type Props = {
   deliveryLabel: string;
 };
 
-type Step = "recipient" | "loading" | "ready" | "success";
+type Step = "recipient" | "ready" | "success";
+type PaymentMethod = "stripe" | "usdc";
+type SuccessInfo = { kind: "paid" | "pending"; reference?: string };
 
 const emptyRecipient: Recipient = {
   fullName: "",
@@ -116,6 +122,42 @@ function StepIndicator({ step }: { step: Step }) {
   );
 }
 
+function MethodTabs({
+  method,
+  onChange,
+}: {
+  method: PaymentMethod;
+  onChange: (m: PaymentMethod) => void;
+}) {
+  const tabs: { id: PaymentMethod; label: string; icon: typeof CreditCard }[] = [
+    { id: "stripe", label: "Tarjeta o banco", icon: CreditCard },
+    { id: "usdc", label: "USDC (Solana)", icon: Coins },
+  ];
+
+  return (
+    <div className="mt-4 grid grid-cols-2 gap-2">
+      {tabs.map((tab) => {
+        const active = method === tab.id;
+        return (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => onChange(tab.id)}
+            className={`flex items-center justify-center gap-2 rounded-xl border px-3 py-3 text-sm font-semibold transition-colors ${
+              active
+                ? "border-lime-400/50 bg-lime-400/10 text-lime-300"
+                : "border-white/10 text-white/50 hover:border-white/20 hover:text-white/80"
+            }`}
+          >
+            <tab.icon size={15} />
+            {tab.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function PaymentForm({
   amountLabel,
   onSuccess,
@@ -162,7 +204,7 @@ function PaymentForm({
   };
 
   return (
-    <form onSubmit={handleSubmit} className="mt-6">
+    <form onSubmit={handleSubmit} className="mt-4">
       <button
         type="button"
         onClick={onBack}
@@ -214,29 +256,30 @@ export default function CheckoutModal({
   deliveryLabel,
 }: Props) {
   const [step, setStep] = useState<Step>("recipient");
+  const [method, setMethod] = useState<PaymentMethod>("stripe");
   const [recipient, setRecipient] = useState<Recipient>(emptyRecipient);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [stripeLoading, setStripeLoading] = useState(false);
+  const [stripeError, setStripeError] = useState<string | null>(null);
+  const [successInfo, setSuccessInfo] = useState<SuccessInfo | null>(null);
 
   useEffect(() => {
     if (!open) {
       setStep("recipient");
+      setMethod("stripe");
       setRecipient(emptyRecipient);
       setClientSecret(null);
-      setError(null);
+      setStripeLoading(false);
+      setStripeError(null);
+      setSuccessInfo(null);
     }
   }, [open]);
 
-  const startPayment = (recipientData: Recipient) => {
-    setRecipient(recipientData);
-    setError(null);
+  const loadStripeIntent = (recipientData: Recipient) => {
+    if (!isStripeConfigured || stripeLoading) return;
 
-    if (!isStripeConfigured) {
-      setStep("ready");
-      return;
-    }
-
-    setStep("loading");
+    setStripeLoading(true);
+    setStripeError(null);
 
     fetch("/api/create-payment-intent", {
       method: "POST",
@@ -259,15 +302,27 @@ export default function CheckoutModal({
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "No se pudo iniciar el pago.");
         setClientSecret(data.clientSecret);
-        setStep("ready");
       })
       .catch((e: Error) => {
-        setError(
+        setStripeError(
           e.message ||
             "No se pudo conectar con el servidor de pagos. Corre `npm run dev:all`."
         );
-        setStep("ready");
-      });
+      })
+      .finally(() => setStripeLoading(false));
+  };
+
+  const handleRecipientSubmit = (recipientData: Recipient) => {
+    setRecipient(recipientData);
+    setStep("ready");
+    if (method === "stripe") loadStripeIntent(recipientData);
+  };
+
+  const handleMethodChange = (next: PaymentMethod) => {
+    setMethod(next);
+    if (next === "stripe" && !clientSecret && !stripeError && !stripeLoading) {
+      loadStripeIntent(recipient);
+    }
   };
 
   const options: StripeElementsOptions | undefined = clientSecret
@@ -362,21 +417,8 @@ export default function CheckoutModal({
                     countryName={country.name}
                     deliveryLabel={deliveryLabel}
                     initialValues={recipient}
-                    onSubmit={startPayment}
+                    onSubmit={handleRecipientSubmit}
                   />
-                </motion.div>
-              )}
-
-              {step === "loading" && (
-                <motion.div
-                  key="loading"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  className="flex flex-col items-center justify-center gap-3 py-12 text-white/50"
-                >
-                  <Loader2 size={28} className="animate-spin text-lime-300" />
-                  Preparando tu pago…
                 </motion.div>
               )}
 
@@ -389,63 +431,91 @@ export default function CheckoutModal({
                   transition={{ duration: 0.25 }}
                 >
                   <h3 className="mt-4 font-display text-xl font-bold text-white">
-                    Paga con tarjeta o cuenta bancaria
+                    Elige cómo pagar
                   </h3>
 
-                  {!isStripeConfigured && (
-                    <div className="mt-4 rounded-2xl border border-lime-400/20 bg-lime-400/5 p-5 text-sm leading-relaxed text-white/70">
-                      <p className="font-semibold text-lime-300">
-                        Stripe todavía no está configurado
-                      </p>
-                      <p className="mt-2">
-                        Para aceptar pagos reales, agrega tu clave publicable
-                        de Stripe en{" "}
-                        <code className="rounded bg-white/10 px-1.5 py-0.5 text-xs">
-                          VITE_STRIPE_PUBLISHABLE_KEY
-                        </code>{" "}
-                        y tu clave secreta en{" "}
-                        <code className="rounded bg-white/10 px-1.5 py-0.5 text-xs">
-                          STRIPE_SECRET_KEY
-                        </code>{" "}
-                        dentro de tu archivo{" "}
-                        <code className="rounded bg-white/10 px-1.5 py-0.5 text-xs">
-                          .env
-                        </code>
-                        .
-                      </p>
-                      <button
-                        onClick={() => setStep("recipient")}
-                        className="mt-4 flex items-center gap-1.5 text-xs font-semibold text-white/70 hover:text-white"
-                      >
-                        <ArrowLeft size={13} />
-                        Volver
-                      </button>
-                    </div>
+                  <MethodTabs method={method} onChange={handleMethodChange} />
+
+                  {method === "stripe" && (
+                    <>
+                      {!isStripeConfigured && (
+                        <div className="mt-4 rounded-2xl border border-lime-400/20 bg-lime-400/5 p-5 text-sm leading-relaxed text-white/70">
+                          <p className="font-semibold text-lime-300">
+                            Stripe todavía no está configurado
+                          </p>
+                          <p className="mt-2">
+                            Para aceptar pagos reales, agrega tu clave publicable
+                            de Stripe en{" "}
+                            <code className="rounded bg-white/10 px-1.5 py-0.5 text-xs">
+                              VITE_STRIPE_PUBLISHABLE_KEY
+                            </code>{" "}
+                            y tu clave secreta en{" "}
+                            <code className="rounded bg-white/10 px-1.5 py-0.5 text-xs">
+                              STRIPE_SECRET_KEY
+                            </code>{" "}
+                            dentro de tu archivo{" "}
+                            <code className="rounded bg-white/10 px-1.5 py-0.5 text-xs">
+                              .env
+                            </code>
+                            .
+                          </p>
+                        </div>
+                      )}
+
+                      {isStripeConfigured && stripeLoading && (
+                        <div className="mt-8 flex flex-col items-center justify-center gap-3 py-8 text-white/50">
+                          <Loader2 size={28} className="animate-spin text-lime-300" />
+                          Preparando tu pago…
+                        </div>
+                      )}
+
+                      {isStripeConfigured && stripeError && !stripeLoading && (
+                        <div className="mt-4 space-y-3">
+                          <div className="flex items-start gap-3 rounded-2xl border border-red-500/25 bg-red-500/10 p-4 text-sm text-red-300">
+                            <ServerCrash size={18} className="mt-0.5 shrink-0" />
+                            <p>{stripeError}</p>
+                          </div>
+                          <button
+                            onClick={() => loadStripeIntent(recipient)}
+                            className="text-xs font-semibold text-lime-300 hover:text-lime-200"
+                          >
+                            Reintentar
+                          </button>
+                        </div>
+                      )}
+
+                      {isStripeConfigured &&
+                        !stripeLoading &&
+                        !stripeError &&
+                        options &&
+                        stripePromise && (
+                          <Elements stripe={stripePromise} options={options}>
+                            <PaymentForm
+                              amountLabel={`$${totalUsd.toFixed(2)}`}
+                              onSuccess={() => {
+                                setSuccessInfo({ kind: "paid" });
+                                setStep("success");
+                              }}
+                              onBack={() => setStep("recipient")}
+                            />
+                          </Elements>
+                        )}
+                    </>
                   )}
 
-                  {isStripeConfigured && error && (
-                    <div className="mt-4 space-y-3">
-                      <div className="flex items-start gap-3 rounded-2xl border border-red-500/25 bg-red-500/10 p-4 text-sm text-red-300">
-                        <ServerCrash size={18} className="mt-0.5 shrink-0" />
-                        <p>{error}</p>
-                      </div>
-                      <button
-                        onClick={() => startPayment(recipient)}
-                        className="text-xs font-semibold text-lime-300 hover:text-lime-200"
-                      >
-                        Reintentar
-                      </button>
-                    </div>
-                  )}
-
-                  {isStripeConfigured && !error && options && stripePromise && (
-                    <Elements stripe={stripePromise} options={options}>
-                      <PaymentForm
-                        amountLabel={`$${totalUsd.toFixed(2)}`}
-                        onSuccess={() => setStep("success")}
-                        onBack={() => setStep("recipient")}
-                      />
-                    </Elements>
+                  {method === "usdc" && (
+                    <CryptoPayment
+                      amountUsd={amountUsd}
+                      totalUsd={totalUsd}
+                      countryName={country.name}
+                      deliveryLabel={deliveryLabel}
+                      recipient={recipient}
+                      onBack={() => setStep("recipient")}
+                      onSuccess={(reference) => {
+                        setSuccessInfo({ kind: "pending", reference });
+                        setStep("success");
+                      }}
+                    />
                   )}
                 </motion.div>
               )}
@@ -461,22 +531,53 @@ export default function CheckoutModal({
                     initial={{ scale: 0 }}
                     animate={{ scale: 1 }}
                     transition={{ type: "spring", stiffness: 200, damping: 12, delay: 0.1 }}
-                    className="grid h-16 w-16 place-items-center rounded-full bg-lime-400/15 text-lime-300"
+                    className={`grid h-16 w-16 place-items-center rounded-full ${
+                      successInfo?.kind === "pending"
+                        ? "bg-emerald-400/15 text-emerald-400"
+                        : "bg-lime-400/15 text-lime-300"
+                    }`}
                   >
-                    <CheckCircle2 size={32} />
+                    {successInfo?.kind === "pending" ? (
+                      <Clock3 size={32} />
+                    ) : (
+                      <CheckCircle2 size={32} />
+                    )}
                   </motion.span>
                   <h3 className="mt-5 font-display text-2xl font-bold text-white">
-                    ¡Envío en camino!
+                    {successInfo?.kind === "pending"
+                      ? "Comprobante recibido"
+                      : "¡Envío en camino!"}
                   </h3>
                   <p className="mt-2 max-w-xs text-sm text-white/55">
-                    {recipient.fullName || "Tu destinatario"} en {country.flag}{" "}
-                    {country.name} recibirá{" "}
-                    {receivedAmount.toLocaleString("en-US", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}{" "}
-                    vía {deliveryLabel.toLowerCase()}.
+                    {successInfo?.kind === "pending" ? (
+                      <>
+                        Estamos verificando tu pago en USDC. Apenas se
+                        confirme en la red Solana, {recipient.fullName ||
+                          "tu destinatario"} en {country.flag} {country.name}{" "}
+                        recibirá{" "}
+                        {receivedAmount.toLocaleString("en-US", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}{" "}
+                        vía {deliveryLabel.toLowerCase()}.
+                      </>
+                    ) : (
+                      <>
+                        {recipient.fullName || "Tu destinatario"} en {country.flag}{" "}
+                        {country.name} recibirá{" "}
+                        {receivedAmount.toLocaleString("en-US", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}{" "}
+                        vía {deliveryLabel.toLowerCase()}.
+                      </>
+                    )}
                   </p>
+                  {successInfo?.kind === "pending" && successInfo.reference && (
+                    <p className="mt-2 text-xs text-white/30">
+                      Referencia: {successInfo.reference}
+                    </p>
+                  )}
                   <button
                     onClick={onClose}
                     className="mt-6 rounded-full border border-white/15 px-6 py-3 text-sm font-semibold text-white/90 transition-colors hover:bg-white/5"
