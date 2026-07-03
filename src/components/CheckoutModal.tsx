@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Elements,
@@ -345,11 +345,12 @@ export default function CheckoutModal({
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [invoiceLoading, setInvoiceLoading] = useState(false);
   const [invoiceError, setInvoiceError] = useState<string | null>(null);
-  const [cryptoFailed, setCryptoFailed] = useState(false);
+  const [cryptoNotice, setCryptoNotice] = useState<"failed" | "closed" | null>(null);
   // El pedido de Paymento en confirmación: llega acá vía resumeOrderId (el
-  // usuario salió de la página y volvió) o vía el iframe en CryptoPayment
-  // (el usuario nunca salió — ver handleCryptoReturn más abajo).
+  // usuario salió de la página y volvió) o vía la ventana emergente que
+  // abre CryptoPayment (el usuario nunca salió — ver handleCryptoReturn).
   const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
+  const popupRef = useRef<Window | null>(null);
 
   useEffect(() => {
     if (!open) {
@@ -363,8 +364,9 @@ export default function CheckoutModal({
       setInvoice(null);
       setInvoiceLoading(false);
       setInvoiceError(null);
-      setCryptoFailed(false);
+      setCryptoNotice(null);
       setActiveOrderId(null);
+      popupRef.current = null;
       return;
     }
     if (resumeOrderId) {
@@ -379,13 +381,15 @@ export default function CheckoutModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  const handleCryptoReturn = (orderId: string) => {
+  const handleCryptoReturn = (orderId: string, popup: Window | null) => {
+    popupRef.current = popup;
     setActiveOrderId(orderId);
     setStep("confirming");
   };
 
   // Mientras esperamos la confirmación de Paymento: consulta el estado del
-  // pedido cada pocos segundos (no hay webhooks del navegador al cliente).
+  // pedido cada pocos segundos (no hay webhooks del navegador al cliente),
+  // y además vigila si el usuario cerró la ventana emergente sin terminar.
   useEffect(() => {
     if (step !== "confirming" || !activeOrderId) return;
     let cancelled = false;
@@ -401,7 +405,13 @@ export default function CheckoutModal({
           setStep("success");
           generateInvoice(recipient, "Cripto (Paymento)", activeOrderId);
         } else if (data.status === "failed") {
-          setCryptoFailed(true);
+          setCryptoNotice("failed");
+          setMethod("crypto");
+          setStep("ready");
+        } else if (popupRef.current?.closed) {
+          // El usuario cerró la ventana antes de que Paymento confirmara
+          // nada — no sabemos si pagó o no, así que lo dejamos reintentar.
+          setCryptoNotice("closed");
           setMethod("crypto");
           setStep("ready");
         }
@@ -697,9 +707,11 @@ export default function CheckoutModal({
 
                   {method === "crypto" && (
                     <>
-                      {cryptoFailed && (
+                      {cryptoNotice && (
                         <div className="mt-4 rounded-xl border border-lime-400/20 bg-lime-400/5 px-4 py-3 text-sm text-white/70">
-                          Paymento no pudo confirmar el pago. Intenta de nuevo o elige otro método.
+                          {cryptoNotice === "closed"
+                            ? "Cerraste la ventana de pago antes de confirmar. Intenta de nuevo si no completaste el pago."
+                            : "Paymento no pudo confirmar el pago. Intenta de nuevo o elige otro método."}
                         </div>
                       )}
                       <CryptoPayment
@@ -762,8 +774,9 @@ export default function CheckoutModal({
                     Confirmando tu pago con Paymento…
                   </p>
                   <p className="max-w-xs text-sm text-white/50">
-                    Esto puede tardar un momento mientras se acredita la
-                    transacción. No cierres esta ventana.
+                    Completa el pago en la ventana emergente de Paymento — esta
+                    página se actualiza sola apenas se confirme. No cierres
+                    esta pestaña.
                   </p>
                 </motion.div>
               )}
