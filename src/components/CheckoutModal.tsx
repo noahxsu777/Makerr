@@ -20,14 +20,16 @@ import {
   Coins,
   FlaskConical,
   Sparkles,
+  Landmark,
 } from "lucide-react";
 import { isStripeConfigured, stripePromise } from "../lib/stripe";
 import { createInvoice, type Invoice } from "../lib/invoice";
 import RecipientForm, { type Recipient } from "./RecipientForm";
 import CryptoPayment from "./CryptoPayment";
+import EuBankTransfer from "./EuBankTransfer";
 import InvoiceCard from "./InvoiceCard";
 
-type Country = { name: string; flag: string };
+type Country = { name: string; flag: string; currency: string };
 
 type Props = {
   open: boolean;
@@ -42,8 +44,12 @@ type Props = {
 };
 
 type Step = "recipient" | "ready" | "success";
-type PaymentMethod = "stripe" | "usdc" | "test";
-type SuccessInfo = { kind: "paid" | "pending" | "test"; reference?: string };
+type PaymentMethod = "stripe" | "usdc" | "eu_bank" | "test";
+type SuccessInfo = {
+  kind: "paid" | "pending" | "test";
+  reference?: string;
+  pendingVia?: "usdc" | "eu_bank";
+};
 
 const emptyRecipient: Recipient = {
   fullName: "",
@@ -54,6 +60,7 @@ const emptyRecipient: Recipient = {
   accountType: "",
   documentType: "",
   documentNumber: "",
+  bankCode: "",
 };
 
 const appearance = {
@@ -137,11 +144,12 @@ function MethodTabs({
   const tabs: { id: PaymentMethod; label: string; icon: typeof CreditCard }[] = [
     { id: "stripe", label: "Tarjeta o banco", icon: CreditCard },
     { id: "usdc", label: "USDC (Solana)", icon: Coins },
+    { id: "eu_bank", label: "Banco (Europa)", icon: Landmark },
     { id: "test", label: "Prueba", icon: FlaskConical },
   ];
 
   return (
-    <div className="mt-4 grid grid-cols-3 gap-2">
+    <div className="mt-4 grid grid-cols-2 gap-2">
       {tabs.map((tab) => {
         const active = method === tab.id;
         return (
@@ -401,6 +409,7 @@ export default function CheckoutModal({
         recipientAccountType: recipientData.accountType,
         recipientDocumentType: recipientData.documentType,
         recipientDocumentNumber: recipientData.documentNumber,
+        recipientBankCode: recipientData.bankCode,
       }),
     })
       .then(async (res) => {
@@ -526,6 +535,7 @@ export default function CheckoutModal({
                   </h3>
                   <RecipientForm
                     countryName={country.name}
+                    currency={country.currency}
                     deliveryLabel={deliveryLabel}
                     initialValues={recipient}
                     onSubmit={handleRecipientSubmit}
@@ -628,9 +638,25 @@ export default function CheckoutModal({
                       recipient={recipient}
                       onBack={() => setStep("recipient")}
                       onSuccess={(reference) => {
-                        setSuccessInfo({ kind: "pending", reference });
+                        setSuccessInfo({ kind: "pending", reference, pendingVia: "usdc" });
                         setStep("success");
                         generateInvoice(recipient, "USDC (Solana)", reference);
+                      }}
+                    />
+                  )}
+
+                  {method === "eu_bank" && (
+                    <EuBankTransfer
+                      amountUsd={amountUsd}
+                      totalUsd={totalUsd}
+                      countryName={country.name}
+                      deliveryLabel={deliveryLabel}
+                      recipient={recipient}
+                      onBack={() => setStep("recipient")}
+                      onSuccess={(reference) => {
+                        setSuccessInfo({ kind: "pending", reference, pendingVia: "eu_bank" });
+                        setStep("success");
+                        generateInvoice(recipient, "Transferencia bancaria (Europa)", reference);
                       }}
                     />
                   )}
@@ -693,8 +719,14 @@ export default function CheckoutModal({
                       </>
                     ) : successInfo?.kind === "pending" ? (
                       <>
-                        Estamos verificando tu pago en USDC. Apenas se
-                        confirme en la red Solana, {recipient.fullName ||
+                        {successInfo.pendingVia === "eu_bank"
+                          ? "Estamos verificando tu transferencia bancaria europea."
+                          : "Estamos verificando tu pago en USDC."}{" "}
+                        Apenas se confirme{" "}
+                        {successInfo.pendingVia === "eu_bank"
+                          ? "el ingreso a la cuenta"
+                          : "en la red Solana"}
+                        , {recipient.fullName ||
                           "tu destinatario"} en {country.flag} {country.name}{" "}
                         recibirá{" "}
                         {receivedAmount.toLocaleString("en-US", {

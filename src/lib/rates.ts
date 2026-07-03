@@ -16,6 +16,7 @@ export const FALLBACK_RATES: Record<string, number> = {
   PHP: 56.9,
   INR: 83.5,
   VND: 25410,
+  EUR: 0.92,
 };
 
 export function getFallbackRate(currency: string): number {

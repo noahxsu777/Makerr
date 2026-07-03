@@ -54,7 +54,7 @@ export default function Press() {
                 Lukea es una plataforma de envío de dinero hecha en Estados
                 Unidos para la comunidad latina. Ofrece tasas de cambio en
                 tiempo real con margen transparente, ocho formas de entrega
-                en 22 países, y pago con tarjeta, cuenta bancaria o USDC.
+                en 21 países, y pago con tarjeta, cuenta bancaria o USDC.
                 Boilerplate libre de usar en artículos y menciones.
               </p>
             </motion.div>
