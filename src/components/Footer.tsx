@@ -1,21 +1,43 @@
+import { Link } from "react-router-dom";
 import { Send, AtSign, MessageCircle, Camera, Video } from "lucide-react";
 
 const columns = [
   {
     title: "Producto",
-    links: ["Cómo funciona", "Formas de entrega", "Tasas en vivo", "App móvil"],
+    links: [
+      { label: "Cómo funciona", to: "/#como-funciona" },
+      { label: "Formas de entrega", to: "/#opciones" },
+      { label: "Tasas en vivo", to: "/#calculadora" },
+      { label: "App móvil", to: "/#top" },
+    ],
   },
   {
     title: "Países",
-    links: ["México", "Colombia", "Guatemala", "Honduras", "Filipinas"],
+    links: [
+      { label: "México", to: "/#paises" },
+      { label: "Colombia", to: "/#paises" },
+      { label: "Guatemala", to: "/#paises" },
+      { label: "Honduras", to: "/#paises" },
+      { label: "Filipinas", to: "/#paises" },
+    ],
   },
   {
     title: "Compañía",
-    links: ["Sobre nosotros", "Carreras", "Prensa", "Blog"],
+    links: [
+      { label: "Sobre nosotros", to: "/sobre-nosotros" },
+      { label: "Carreras", to: "/carreras" },
+      { label: "Prensa", to: "/prensa" },
+      { label: "Blog", to: "/blog" },
+    ],
   },
   {
     title: "Soporte",
-    links: ["Centro de ayuda", "Contacto", "Estado del servicio", "Seguridad"],
+    links: [
+      { label: "Centro de ayuda", to: "/#faq" },
+      { label: "Contacto", to: "/prensa" },
+      { label: "Estado del servicio", to: "#" },
+      { label: "Seguridad", to: "/sobre-nosotros" },
+    ],
   },
 ];
 
@@ -25,14 +47,14 @@ export default function Footer() {
       <div className="mx-auto max-w-7xl px-4 pb-10 sm:px-6 lg:px-8">
         <div className="grid gap-12 lg:grid-cols-[1.4fr_2fr]">
           <div>
-            <a href="#top" className="flex items-center gap-2">
+            <Link to="/" className="flex items-center gap-2">
               <span className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-lime-400 via-emerald-400 to-emerald-400 text-ink-950">
                 <Send size={18} strokeWidth={2.5} />
               </span>
               <span className="font-display text-lg font-bold text-white">
                 Luk<span className="text-gradient">ea</span>
               </span>
-            </a>
+            </Link>
             <p className="mt-4 max-w-xs text-sm leading-relaxed text-white/45">
               Remesas con mejor diseño, más opciones de entrega y las tasas
               más transparentes del mercado.
@@ -58,13 +80,13 @@ export default function Footer() {
                 </h4>
                 <ul className="mt-4 space-y-2.5">
                   {col.links.map((l) => (
-                    <li key={l}>
-                      <a
-                        href="#"
+                    <li key={l.label}>
+                      <Link
+                        to={l.to}
                         className="text-sm text-white/55 transition-colors hover:text-white"
                       >
-                        {l}
-                      </a>
+                        {l.label}
+                      </Link>
                     </li>
                   ))}
                 </ul>
