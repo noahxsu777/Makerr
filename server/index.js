@@ -10,7 +10,11 @@ import Stripe from "stripe";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.join(__dirname, "..", "dist");
-const uploadsDir = path.join(__dirname, "uploads");
+// En Vercel el filesystem es de solo lectura salvo /tmp (y ni siquiera eso
+// persiste entre invocaciones) — sin este branch, mkdirSync tira EROFS al
+// cargar el módulo y tumba la función entera para *todas* las rutas, no
+// solo las de subida de archivos.
+const uploadsDir = process.env.VERCEL ? "/tmp/uploads" : path.join(__dirname, "uploads");
 mkdirSync(uploadsDir, { recursive: true });
 
 const {
@@ -516,6 +520,15 @@ app.use((err, _req, res, _next) => {
   res.status(400).json({ error: err.message || "Ocurrió un error inesperado." });
 });
 
-app.listen(PORT, () => {
-  console.log(`[server] Escuchando en http://localhost:${PORT}`);
-});
+// En Vercel este archivo se importa como función serverless (ver
+// api/[...path].js) — Vercel maneja el listener HTTP, así que no hay que
+// levantar uno propio ahí. Solo escuchamos en el puerto cuando este archivo
+// se ejecuta directamente (`npm run server` / `npm run dev:all`).
+const isMainModule = process.argv[1] === fileURLToPath(import.meta.url);
+if (isMainModule) {
+  app.listen(PORT, () => {
+    console.log(`[server] Escuchando en http://localhost:${PORT}`);
+  });
+}
+
+export default app;
