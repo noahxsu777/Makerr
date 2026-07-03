@@ -346,6 +346,10 @@ export default function CheckoutModal({
   const [invoiceLoading, setInvoiceLoading] = useState(false);
   const [invoiceError, setInvoiceError] = useState<string | null>(null);
   const [cryptoFailed, setCryptoFailed] = useState(false);
+  // El pedido de Paymento en confirmación: llega acá vía resumeOrderId (el
+  // usuario salió de la página y volvió) o vía el iframe en CryptoPayment
+  // (el usuario nunca salió — ver handleCryptoReturn más abajo).
+  const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) {
@@ -360,11 +364,13 @@ export default function CheckoutModal({
       setInvoiceLoading(false);
       setInvoiceError(null);
       setCryptoFailed(false);
+      setActiveOrderId(null);
       return;
     }
     if (resumeOrderId) {
       setMethod("crypto");
       setRecipient(resumeRecipient ?? emptyRecipient);
+      setActiveOrderId(resumeOrderId);
       setStep("confirming");
     }
     // resumeOrderId/resumeRecipient solo importan en el instante en que
@@ -373,22 +379,27 @@ export default function CheckoutModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
+  const handleCryptoReturn = (orderId: string) => {
+    setActiveOrderId(orderId);
+    setStep("confirming");
+  };
+
   // Mientras esperamos la confirmación de Paymento: consulta el estado del
   // pedido cada pocos segundos (no hay webhooks del navegador al cliente).
   useEffect(() => {
-    if (step !== "confirming" || !resumeOrderId) return;
+    if (step !== "confirming" || !activeOrderId) return;
     let cancelled = false;
 
     const poll = async () => {
       try {
-        const res = await fetch(`/api/order-status/${resumeOrderId}`);
+        const res = await fetch(`/api/order-status/${activeOrderId}`);
         if (!res.ok || cancelled) return;
         const data = await res.json();
         if (cancelled) return;
         if (data.status === "paid") {
           setSuccessInfo({ kind: "paid" });
           setStep("success");
-          generateInvoice(recipient, "Cripto (Paymento)", resumeOrderId);
+          generateInvoice(recipient, "Cripto (Paymento)", activeOrderId);
         } else if (data.status === "failed") {
           setCryptoFailed(true);
           setMethod("crypto");
@@ -406,7 +417,7 @@ export default function CheckoutModal({
       clearInterval(interval);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, resumeOrderId]);
+  }, [step, activeOrderId]);
 
   const generateInvoice = (
     recipientData: Recipient,
@@ -702,6 +713,7 @@ export default function CheckoutModal({
                         recipient={recipient}
                         promoCode={promoCode}
                         onBack={() => setStep("recipient")}
+                        onReturn={handleCryptoReturn}
                       />
                     </>
                   )}

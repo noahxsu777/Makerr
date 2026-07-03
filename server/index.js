@@ -311,9 +311,20 @@ app.post("/api/create-crypto-session", async (req, res) => {
         riskSpeed: 1, // esperar confirmaciones antes de dar el pago por bueno
       }),
     });
-    const data = await paymentoRes.json();
+
+    const rawText = await paymentoRes.text();
+    let data;
+    try {
+      data = JSON.parse(rawText);
+    } catch {
+      // Si Paymento (o un proxy/CDN delante) responde HTML en vez de JSON,
+      // normalmente es que PAYMENTO_API_BASE_URL o la ruta están mal.
+      throw new Error(
+        `Paymento respondió ${paymentoRes.status} sin JSON válido — revisa PAYMENTO_API_BASE_URL. Cuerpo: ${rawText.slice(0, 200)}`
+      );
+    }
     if (!paymentoRes.ok || !data.success || !data.body) {
-      throw new Error(data.message || "Paymento rechazó la sesión de pago.");
+      throw new Error(data.message || `Paymento rechazó la sesión de pago (HTTP ${paymentoRes.status}).`);
     }
 
     const token = data.body;
@@ -341,7 +352,10 @@ app.post("/api/create-crypto-session", async (req, res) => {
     res.json({ orderId, paymentUrl: `${PAYMENTO_GATEWAY_BASE_URL}?token=${encodeURIComponent(token)}` });
   } catch (err) {
     console.error("[server] Error creando sesión de Paymento:", err.message);
-    res.status(500).json({ error: "No se pudo iniciar el pago con Paymento. Intenta de nuevo." });
+    res.status(500).json({
+      error: "No se pudo iniciar el pago con Paymento. Intenta de nuevo.",
+      detail: err.message,
+    });
   }
 });
 
