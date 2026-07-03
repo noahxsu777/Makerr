@@ -11,7 +11,7 @@ con Stripe (tarjeta o cuenta bancaria vía ACH).
 - Hero animado con blobs flotantes y una tarjeta de envío interactiva
 - Marquee infinito con 16 países de destino
 - Calculadora de envío en vivo con números animados y forma de entrega elegible
-- Tasas de cambio en tiempo real (con margen de Lukea aplicado) con respaldo automático si la API externa falla
+- Tasas de cambio en tiempo real vía exchangerate.fun (con margen de Lukea del 2% aplicado) con respaldo automático si la API externa falla
 - Checkout funcional con Stripe: tarjeta de crédito/débito o cuenta bancaria (ACH)
 - Formulario de destinatario con campos específicos por país (CCI en Perú, tipo de documento/cuenta en Colombia, CLABE en México)
 - Sección "Cómo funciona" con revelado por scroll
@@ -23,16 +23,17 @@ con Stripe (tarjeta o cuenta bancaria vía ACH).
 
 ## Tasas de cambio en vivo
 
-El backend (`GET /api/rates`) consulta dos fuentes públicas de tasas en tiempo
-real, sin API key (si la primera falla, intenta con la segunda), y les resta
-un margen de **0.5%** antes de devolverlas — esa diferencia es el margen de
-Lukea, y el cliente nunca ve la tasa de mercado cruda. Las tasas se cachean 10
-minutos en el servidor para no golpear las APIs en cada request; si ambas
-fuentes fallan pero ya había un valor cacheado, se sigue sirviendo ese en vez
-de romper la calculadora.
+El backend (`GET /api/rates`) consulta [exchangerate.fun](https://www.exchangerate.fun/docs/)
+(`api.exchangerate.fun/latest`, gratis, sin API key) como fuente principal, y
+si falla intenta con dos fuentes públicas más de respaldo. A todo el mundo le
+resta un margen de **2%** antes de devolverlo — esa diferencia es el margen
+de Lukea, y el cliente nunca ve la tasa de mercado cruda. Las tasas se
+cachean 10 minutos en el servidor para no golpear las APIs en cada request;
+si las tres fuentes fallan pero ya había un valor cacheado, se sigue
+sirviendo ese en vez de romper la calculadora.
 
 Si ninguna fuente responde (o no hay salida a internet), la calculadora usa
-automáticamente las tasas de respaldo definidas en `src/lib/data.ts` y lo
+automáticamente las tasas de respaldo definidas en `src/lib/rates.ts` y lo
 indica con un aviso de "Tasa de respaldo" — con el motivo exacto debajo, para
 poder diagnosticarlo.
 

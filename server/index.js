@@ -36,11 +36,15 @@ function truncate(value, max = 480) {
 }
 
 // --- Tasas de cambio en vivo ---------------------------------------------
-// Fuentes gratuitas, sin API key. Probamos la primera y, si falla, la
-// segunda antes de rendirnos. Le restamos FX_MARGIN al valor de mercado
-// antes de mostrarlo: esa diferencia es el margen de Lukea. El cliente
-// nunca ve la tasa cruda.
+// Fuentes gratuitas, sin API key. Probamos la primera (exchangerate.fun,
+// la que nos pasaron) y si falla, las siguientes como respaldo antes de
+// rendirnos. Le restamos FX_MARGIN al valor de mercado antes de mostrarlo:
+// esa diferencia es el margen de Lukea. El cliente nunca ve la tasa cruda.
 const RATES_SOURCES = [
+  {
+    url: "https://api.exchangerate.fun/latest?base=USD",
+    parse: (json) => json?.rates,
+  },
   {
     url: "https://open.er-api.com/v6/latest/USD",
     parse: (json) => json?.rates,
@@ -59,7 +63,7 @@ const RATES_SOURCES = [
 ];
 
 const RATES_TTL_MS = 10 * 60 * 1000; // 10 minutos
-const FX_MARGIN = 0.005; // 0.5%
+const FX_MARGIN = 0.02; // 2%
 
 const SUPPORTED_CURRENCIES = [
   "MXN",
