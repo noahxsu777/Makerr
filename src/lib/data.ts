@@ -1,23 +1,23 @@
-// `rate` es la tasa de respaldo que se usa solo si la API de tasas en vivo
-// no responde. `currency` es el código ISO usado para buscar la tasa en vivo
-// en /api/rates (ya viene con el margen de Lukea aplicado).
+// Identidad de cada país destino. `currency` es el código ISO usado para
+// buscar su tasa (en vivo o de respaldo) en src/lib/rates.ts — las tasas
+// viven aparte porque cambian con el tiempo, esto no.
 export const countries = [
-  { name: "México", flag: "🇲🇽", currency: "MXN", rate: 18.42 },
-  { name: "Guatemala", flag: "🇬🇹", currency: "GTQ", rate: 7.79 },
-  { name: "Colombia", flag: "🇨🇴", currency: "COP", rate: 4128 },
-  { name: "El Salvador", flag: "🇸🇻", currency: "USD", rate: 1 },
-  { name: "Honduras", flag: "🇭🇳", currency: "HNL", rate: 24.71 },
-  { name: "República Dominicana", flag: "🇩🇴", currency: "DOP", rate: 60.15 },
-  { name: "Ecuador", flag: "🇪🇨", currency: "USD", rate: 1 },
-  { name: "Perú", flag: "🇵🇪", currency: "PEN", rate: 3.71 },
-  { name: "Nicaragua", flag: "🇳🇮", currency: "NIO", rate: 36.6 },
-  { name: "Bolivia", flag: "🇧🇴", currency: "BOB", rate: 6.91 },
-  { name: "Venezuela", flag: "🇻🇪", currency: "VES", rate: 39.8 },
-  { name: "Brasil", flag: "🇧🇷", currency: "BRL", rate: 5.44 },
-  { name: "Argentina", flag: "🇦🇷", currency: "ARS", rate: 913.2 },
-  { name: "Filipinas", flag: "🇵🇭", currency: "PHP", rate: 56.9 },
-  { name: "India", flag: "🇮🇳", currency: "INR", rate: 83.5 },
-  { name: "Vietnam", flag: "🇻🇳", currency: "VND", rate: 25410 },
+  { name: "México", flag: "🇲🇽", currency: "MXN" },
+  { name: "Guatemala", flag: "🇬🇹", currency: "GTQ" },
+  { name: "Colombia", flag: "🇨🇴", currency: "COP" },
+  { name: "El Salvador", flag: "🇸🇻", currency: "USD" },
+  { name: "Honduras", flag: "🇭🇳", currency: "HNL" },
+  { name: "República Dominicana", flag: "🇩🇴", currency: "DOP" },
+  { name: "Ecuador", flag: "🇪🇨", currency: "USD" },
+  { name: "Perú", flag: "🇵🇪", currency: "PEN" },
+  { name: "Nicaragua", flag: "🇳🇮", currency: "NIO" },
+  { name: "Bolivia", flag: "🇧🇴", currency: "BOB" },
+  { name: "Venezuela", flag: "🇻🇪", currency: "VES" },
+  { name: "Brasil", flag: "🇧🇷", currency: "BRL" },
+  { name: "Argentina", flag: "🇦🇷", currency: "ARS" },
+  { name: "Filipinas", flag: "🇵🇭", currency: "PHP" },
+  { name: "India", flag: "🇮🇳", currency: "INR" },
+  { name: "Vietnam", flag: "🇻🇳", currency: "VND" },
 ] as const;
 
 export type Country = (typeof countries)[number];

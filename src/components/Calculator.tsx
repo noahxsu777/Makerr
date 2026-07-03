@@ -3,13 +3,15 @@ import { motion } from "framer-motion";
 import { ChevronDown, Zap, ShieldCheck, Clock3, Receipt, Radio, WifiOff } from "lucide-react";
 import { countries, type Country } from "../lib/data";
 import { getTransferFee, MAX_SEND_USD, MIN_SEND_USD } from "../lib/fees";
+import { getFallbackRate } from "../lib/rates";
 import { useLiveRates } from "../lib/useLiveRates";
 import AnimatedNumber from "./AnimatedNumber";
 import CheckoutModal from "./CheckoutModal";
+import RelativeTime from "./RelativeTime";
 
 function getRate(country: Country, liveRates: Record<string, number> | null): number {
   if (country.currency === "USD") return 1;
-  return liveRates?.[country.currency] ?? country.rate;
+  return liveRates?.[country.currency] ?? getFallbackRate(country.currency);
 }
 
 const deliverySpeeds = [
@@ -25,7 +27,12 @@ export default function Calculator() {
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const country = countries[countryIdx];
   const delivery = deliverySpeeds[deliveryIdx];
-  const { rates: liveRates, loading: ratesLoading, error: ratesError } = useLiveRates();
+  const {
+    rates: liveRates,
+    updatedAt: ratesUpdatedAt,
+    loading: ratesLoading,
+    error: ratesError,
+  } = useLiveRates();
 
   const rate = getRate(country, liveRates);
   const isLive = country.currency !== "USD" && Boolean(liveRates?.[country.currency]);
@@ -117,8 +124,13 @@ export default function Calculator() {
                   <span className="text-white/35">Buscando tasas en vivo…</span>
                 ) : isLive ? (
                   <span className="flex items-center gap-1 text-emerald-400">
-                    <Radio size={11} />
+                    <Radio size={11} className="animate-pulse" />
                     Tasa en vivo
+                    {ratesUpdatedAt && (
+                      <span className="text-white/30">
+                        · <RelativeTime date={ratesUpdatedAt} />
+                      </span>
+                    )}
                   </span>
                 ) : (
                   <span className="flex items-center gap-1 text-white/35" title={ratesError ?? undefined}>
