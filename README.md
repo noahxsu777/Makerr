@@ -35,17 +35,20 @@ cachean 10 minutos en el servidor para no golpear las APIs en cada request;
 si las tres fuentes fallan pero ya había un valor cacheado, se sigue
 sirviendo ese en vez de romper la calculadora.
 
-Si ninguna fuente responde (o no hay salida a internet), la calculadora usa
-automáticamente las tasas de respaldo definidas en `src/lib/rates.ts` y lo
-indica con un aviso de "Tasa de respaldo" — con el motivo exacto debajo, para
-poder diagnosticarlo.
+Si `/api/rates` no está disponible — backend caído, `npm run dev` sin
+`npm run server`, o un deploy donde `/api` no llega a ningún servidor — el
+navegador ya no se rompe con un error de "no es JSON válido": en vez de eso,
+`src/lib/rates.ts` intenta pedir la tasa **directo desde el navegador** a
+exchangerate.fun y, si esa también falla, a open.er-api.com, aplicando el
+mismo margen del 2% del lado del cliente. Solo si las dos rutas fallan cae a
+las tasas de respaldo fijas y lo indica con "Tasa de respaldo" (con el motivo
+exacto debajo).
 
-**Si siempre ves "Tasa de respaldo" y nunca "Tasa en vivo":** lo más común es
-que el backend no esté corriendo. `npm run dev` sólo levanta el frontend; para
-que `/api/rates` funcione en desarrollo necesitas `npm run dev:all` (o
-`npm run server` en otra terminal). Puedes confirmar que el backend está vivo
-y qué está pasando con las tasas en `http://localhost:8787/api/health` y
-`http://localhost:8787/api/rates`.
+**Si siempre ves "Tasa de respaldo" y nunca "Tasa en vivo":** revisa el
+mensaje pequeño debajo del aviso — dice exactamente qué intentó y por qué
+falló. Si dice que el backend no respondió JSON, corre `npm run dev:all` (o
+`npm run server` en otra terminal); si dice "Failed to fetch" en las fuentes
+directas, es que tu red/navegador está bloqueando esos dominios.
 
 Para producción, corre `npm run build` y luego `npm run server`: el mismo
 proceso de Express sirve el frontend compilado (`dist/`) *y* las rutas

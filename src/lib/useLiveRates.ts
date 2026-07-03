@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { fetchLiveRatesDirect } from "./rates";
 
 type RatesResponse = {
   rates: Record<string, number>;
@@ -18,6 +19,35 @@ type LiveRatesState = {
 // vivo": apenas el servidor tiene un valor nuevo, lo recogemos en <=1 min.
 const POLL_INTERVAL_MS = 60_000;
 
+async function fetchFromBackend(): Promise<{
+  rates: Record<string, number>;
+  updatedAt: string;
+}> {
+  const res = await fetch("/api/rates");
+  const text = await res.text();
+
+  let data: RatesResponse | { error: string; detail?: string };
+  try {
+    data = JSON.parse(text);
+  } catch {
+    // El backend no está corriendo o /api no está enrutado ahí: el
+    // navegador recibió HTML (una página de error) en vez de JSON.
+    throw new Error("El backend no respondió JSON en /api/rates (¿está corriendo?)");
+  }
+
+  if (!res.ok || !("rates" in data)) {
+    const message =
+      "error" in data
+        ? data.detail
+          ? `${data.error} (${data.detail})`
+          : data.error
+        : "No se pudieron obtener las tasas.";
+    throw new Error(message);
+  }
+
+  return { rates: data.rates, updatedAt: data.updatedAt };
+}
+
 export function useLiveRates() {
   const [state, setState] = useState<LiveRatesState>({
     rates: null,
@@ -31,46 +61,42 @@ export function useLiveRates() {
     let cancelled = false;
 
     const fetchRates = async () => {
+      // 1) Intenta con nuestro backend (así el margen se calcula ahí y el
+      //    cliente nunca ve la tasa cruda).
       try {
-        const res = await fetch("/api/rates");
-        const data = (await res.json()) as
-          | RatesResponse
-          | { error: string; detail?: string };
-
-        if (!res.ok || !("rates" in data)) {
-          const message =
-            "error" in data
-              ? data.detail
-                ? `${data.error} (${data.detail})`
-                : data.error
-              : "No se pudieron obtener las tasas.";
-          throw new Error(message);
-        }
-
+        const result = await fetchFromBackend();
         if (!cancelled) {
           hasLoadedOnce.current = true;
-          setState({
-            rates: data.rates,
-            updatedAt: data.updatedAt,
-            loading: false,
-            error: null,
-          });
+          setState({ ...result, loading: false, error: null });
         }
-      } catch (e) {
-        if (cancelled) return;
-        const message =
-          e instanceof TypeError
-            ? "No se pudo conectar con el servidor (¿está corriendo `npm run server` o `npm run dev:all`?)."
-            : (e as Error).message;
-        // Si ya teníamos tasas en vivo y solo falló un refresco en segundo
-        // plano, las dejamos como están en vez de tirar todo a respaldo.
-        setState((s) => ({
-          ...s,
-          loading: false,
-          error: hasLoadedOnce.current ? s.error : message,
-        }));
-        if (import.meta.env.DEV) {
-          console.warn("[useLiveRates] no se pudo refrescar:", message);
+        return;
+      } catch (backendErr) {
+        // 2) El backend no está disponible (deploy sin backend, `npm run dev`
+        //    sin el server, etc.): probamos pedir la tasa directo desde el
+        //    navegador antes de rendirnos a la tasa de respaldo.
+        try {
+          const result = await fetchLiveRatesDirect();
+          if (!cancelled) {
+            hasLoadedOnce.current = true;
+            setState({ ...result, loading: false, error: null });
+          }
+          return;
+        } catch (directErr) {
+          if (cancelled) return;
+          const message = (directErr as Error).message;
+          setState((s) => ({
+            ...s,
+            loading: false,
+            error: hasLoadedOnce.current ? s.error : message,
+          }));
+          if (import.meta.env.DEV) {
+            console.warn(
+              "[useLiveRates] backend falló:",
+              (backendErr as Error).message,
+              "| fetch directo también falló:",
+              message
+            );
+          }
         }
       }
     };
