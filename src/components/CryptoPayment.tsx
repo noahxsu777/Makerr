@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { motion } from "framer-motion";
 import { Loader2, ArrowLeft, ExternalLink, ServerCrash } from "lucide-react";
 import type { Recipient } from "./RecipientForm";
@@ -32,9 +32,10 @@ type Props = {
   recipient: Recipient;
   promoCode?: string;
   onBack: () => void;
-  // Se dispara cuando el iframe de Paymento vuelve a nuestro propio dominio
-  // (la vuelta trae ?paymento=return&orderId=...) sin haber salido de la página.
-  onReturn: (orderId: string) => void;
+  // Se dispara apenas se abre la ventana emergente de Paymento, para que el
+  // modal pase a "confirmando" y empiece a consultar el estado del pedido.
+  // `popup` es la referencia a la ventana (o null si el navegador la bloqueó).
+  onReturn: (orderId: string, popup: Window | null) => void;
 };
 
 export default function CryptoPayment({
@@ -52,12 +53,15 @@ export default function CryptoPayment({
 }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const handleClick = async () => {
     setSubmitting(true);
     setError(null);
+
+    // Hay que abrir la ventana ya, de forma síncrona con el click — si se
+    // abre después de esperar el fetch, los navegadores ya no lo consideran
+    // resultado directo de una acción del usuario y bloquean el popup.
+    const popup = window.open("", "paymento_checkout", "width=480,height=760");
 
     try {
       const res = await fetch("/api/create-crypto-session", {
@@ -88,9 +92,8 @@ export default function CryptoPayment({
         );
       }
 
-      // Se guarda por si el iframe no carga (X-Frame-Options de Paymento) y
-      // el usuario usa el link de "ábrelo en una pestaña nueva" de abajo,
-      // que sí navega fuera de la página — ver Calculator.tsx para el resume.
+      // Se guarda por si el popup fue bloqueado por el navegador y caemos
+      // al respaldo de redirigir la pestaña actual — ver Calculator.tsx.
       const context: CryptoOrderContext = {
         orderId: data.orderId,
         amountUsd,
@@ -105,71 +108,25 @@ export default function CryptoPayment({
         promoCode,
       };
       window.sessionStorage.setItem(CRYPTO_ORDER_STORAGE_KEY, JSON.stringify(context));
-      setCheckoutUrl(data.paymentUrl);
+
+      if (popup && !popup.closed) {
+        popup.location.href = data.paymentUrl;
+        onReturn(data.orderId, popup);
+      } else {
+        // El navegador bloqueó la ventana emergente: la única opción que
+        // queda es navegar la pestaña actual (con resume al volver).
+        window.location.href = data.paymentUrl;
+      }
     } catch (err) {
+      popup?.close();
       setError(
         err instanceof TypeError
           ? "No se pudo conectar con el servidor. ¿Está corriendo `npm run server` o `npm run dev:all`?"
           : (err as Error).message
       );
-    } finally {
       setSubmitting(false);
     }
   };
-
-  const handleIframeLoad = () => {
-    const iframe = iframeRef.current;
-    if (!iframe) return;
-    try {
-      // Mientras el iframe siga en el dominio de Paymento esto tira una
-      // excepción cross-origin (comportamiento normal y esperado). Solo se
-      // puede leer la URL una vez que Paymento navega de vuelta a nuestra
-      // propia returnUrl, momento en el que ya es same-origin.
-      const href = iframe.contentWindow?.location.href;
-      if (!href) return;
-      const url = new URL(href);
-      const orderId = url.searchParams.get("orderId");
-      if (url.searchParams.get("paymento") === "return" && orderId) {
-        setCheckoutUrl(null);
-        onReturn(orderId);
-      }
-    } catch {
-      // Sigue en app.paymento.io — nada que hacer todavía.
-    }
-  };
-
-  if (checkoutUrl) {
-    return (
-      <div className="mt-4">
-        <button
-          type="button"
-          onClick={() => setCheckoutUrl(null)}
-          className="mb-4 flex items-center gap-1.5 text-xs font-medium text-white/45 transition-colors hover:text-white"
-        >
-          <ArrowLeft size={13} />
-          Volver
-        </button>
-        <div className="overflow-hidden rounded-2xl border border-white/10">
-          <iframe
-            ref={iframeRef}
-            src={checkoutUrl}
-            onLoad={handleIframeLoad}
-            title="Pago con Paymento"
-            className="h-[560px] w-full bg-white"
-          />
-        </div>
-        <a
-          href={checkoutUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="mt-3 flex items-center justify-center gap-1.5 text-xs text-white/40 underline transition-colors hover:text-white/70"
-        >
-          ¿No carga? Ábrelo en una pestaña nueva
-          <ExternalLink size={12} />
-        </a>
-      </div>
-    );
-  }
 
   return (
     <div className="mt-4">
@@ -190,8 +147,8 @@ export default function CryptoPayment({
           ${totalUsd.toFixed(2)}
         </p>
         <p className="mt-3 text-xs leading-relaxed text-white/40">
-          Se abre el checkout de Paymento aquí mismo para elegir tu moneda y
-          completar el pago. Al confirmar, se cierra solo.
+          Se abre en una ventana aparte para elegir tu moneda y completar el
+          pago — esta página se queda esperando y se actualiza sola.
         </p>
       </div>
 
@@ -214,7 +171,10 @@ export default function CryptoPayment({
             Abriendo Paymento…
           </>
         ) : (
-          "Pagar con cripto"
+          <>
+            Pagar con cripto
+            <ExternalLink size={16} />
+          </>
         )}
       </button>
 
@@ -224,7 +184,8 @@ export default function CryptoPayment({
         className="mt-4 text-center text-xs text-white/35"
       >
         Procesado por Paymento. Confirmamos tu pago automáticamente en
-        cuanto la transacción se acredita.
+        cuanto la transacción se acredita. Si tu navegador bloquea la
+        ventana emergente, te llevamos directo a Paymento en esta pestaña.
       </motion.p>
     </div>
   );
