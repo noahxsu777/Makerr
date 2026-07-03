@@ -22,8 +22,10 @@ import {
   Sparkles,
 } from "lucide-react";
 import { isStripeConfigured, stripePromise } from "../lib/stripe";
+import type { Invoice } from "../lib/invoice";
 import RecipientForm, { type Recipient } from "./RecipientForm";
 import CryptoPayment from "./CryptoPayment";
+import InvoiceCard from "./InvoiceCard";
 
 type Country = { name: string; flag: string };
 
@@ -322,6 +324,9 @@ export default function CheckoutModal({
   const [stripeLoading, setStripeLoading] = useState(false);
   const [stripeError, setStripeError] = useState<string | null>(null);
   const [successInfo, setSuccessInfo] = useState<SuccessInfo | null>(null);
+  const [invoice, setInvoice] = useState<Invoice | null>(null);
+  const [invoiceLoading, setInvoiceLoading] = useState(false);
+  const [invoiceError, setInvoiceError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) {
@@ -332,8 +337,43 @@ export default function CheckoutModal({
       setStripeLoading(false);
       setStripeError(null);
       setSuccessInfo(null);
+      setInvoice(null);
+      setInvoiceLoading(false);
+      setInvoiceError(null);
     }
   }, [open]);
+
+  const generateInvoice = (
+    recipientData: Recipient,
+    paymentMethodLabel: string,
+    orderReference: string
+  ) => {
+    setInvoiceLoading(true);
+    setInvoiceError(null);
+
+    fetch("/api/invoices", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        amount: amountUsd,
+        fee: feeUsd,
+        total: totalUsd,
+        countryName: country.name,
+        deliveryMethod: deliveryLabel,
+        paymentMethod: paymentMethodLabel,
+        recipientName: recipientData.fullName,
+        recipientReference: recipientData.reference,
+        orderReference,
+      }),
+    })
+      .then(async (res) => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "No se pudo generar la factura.");
+        setInvoice(data);
+      })
+      .catch((e: Error) => setInvoiceError(e.message))
+      .finally(() => setInvoiceLoading(false));
+  };
 
   const loadStripeIntent = (recipientData: Recipient) => {
     if (!isStripeConfigured || stripeLoading) return;
@@ -555,6 +595,11 @@ export default function CheckoutModal({
                               onSuccess={() => {
                                 setSuccessInfo({ kind: "paid" });
                                 setStep("success");
+                                generateInvoice(
+                                  recipient,
+                                  "Tarjeta o cuenta bancaria (Stripe)",
+                                  clientSecret?.split("_secret_")[0] ?? crypto.randomUUID()
+                                );
                               }}
                               onBack={() => setStep("recipient")}
                             />
@@ -574,6 +619,7 @@ export default function CheckoutModal({
                       onSuccess={(reference) => {
                         setSuccessInfo({ kind: "pending", reference });
                         setStep("success");
+                        generateInvoice(recipient, "USDC (Solana)", reference);
                       }}
                     />
                   )}
@@ -585,6 +631,7 @@ export default function CheckoutModal({
                       onSuccess={() => {
                         setSuccessInfo({ kind: "test" });
                         setStep("success");
+                        generateInvoice(recipient, "Modo de prueba", crypto.randomUUID());
                       }}
                     />
                   )}
@@ -662,6 +709,17 @@ export default function CheckoutModal({
                       Referencia: {successInfo.reference}
                     </p>
                   )}
+
+                  <InvoiceCard
+                    invoice={invoice}
+                    loading={invoiceLoading}
+                    error={invoiceError}
+                    receivedLabel={receivedAmount.toLocaleString("en-US", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  />
+
                   <button
                     onClick={onClose}
                     className="mt-6 rounded-full border border-white/15 px-6 py-3 text-sm font-semibold text-white/90 transition-colors hover:bg-white/5"
