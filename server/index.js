@@ -47,6 +47,11 @@ if (!PAYMENTO_IPN_SECRET) {
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
 
 const app = express();
+// Vercel (y cualquier proxy TLS-terminating) manda la conexión real por
+// HTTPS pero nos la reenvía por HTTP con X-Forwarded-Proto: https — sin
+// esto, req.protocol siempre da "http" y Paymento rechaza la returnUrl
+// ("Only HTTPS URLs are allowed").
+app.set("trust proxy", true);
 app.use(cors());
 // El callback (IPN) de Paymento firma el body crudo con HMAC-SHA256 — hay
 // que guardarlo tal cual antes de que este middleware lo parsee a JSON.
