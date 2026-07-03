@@ -41,14 +41,19 @@ type Props = {
   country: Country;
   deliveryLabel: string;
   promoCode?: string;
+  // Presentes cuando el usuario vuelve del checkout hospedado de MaxelPay
+  // (ver Calculator.tsx): la navegación completa a MaxelPay y de vuelta
+  // destruye el estado de este modal, así que se reconstruye desde acá.
+  resumeOrderId?: string;
+  resumeCancelled?: boolean;
+  resumeRecipient?: Recipient;
 };
 
-type Step = "recipient" | "ready" | "success";
-type PaymentMethod = "stripe" | "usdc" | "eu_bank" | "test";
+type Step = "recipient" | "ready" | "confirming" | "success";
+type PaymentMethod = "stripe" | "crypto" | "eu_bank" | "test";
 type SuccessInfo = {
   kind: "paid" | "pending" | "test";
   reference?: string;
-  pendingVia?: "usdc" | "eu_bank";
 };
 
 const emptyRecipient: Recipient = {
@@ -143,7 +148,7 @@ function MethodTabs({
 }) {
   const tabs: { id: PaymentMethod; label: string; icon: typeof CreditCard }[] = [
     { id: "stripe", label: "Tarjeta o banco", icon: CreditCard },
-    { id: "usdc", label: "USDC (Solana)", icon: Coins },
+    { id: "crypto", label: "Cripto (MaxelPay)", icon: Coins },
     { id: "eu_bank", label: "Banco (Europa)", icon: Landmark },
     { id: "test", label: "Prueba", icon: FlaskConical },
   ];
@@ -292,8 +297,8 @@ function TestPaymentPanel({
         </span>
         <p className="mt-3 font-semibold text-lime-300">Modo de prueba</p>
         <p className="mt-1 text-sm leading-relaxed text-white/60">
-          No se hace ningún cargo real ni se contacta a Stripe o Solana. Sirve
-          para probar el flujo completo del checkout de punta a punta.
+          No se hace ningún cargo real ni se contacta a Stripe o MaxelPay.
+          Sirve para probar el flujo completo del checkout de punta a punta.
         </p>
       </div>
 
@@ -326,6 +331,9 @@ export default function CheckoutModal({
   country,
   deliveryLabel,
   promoCode,
+  resumeOrderId,
+  resumeCancelled,
+  resumeRecipient,
 }: Props) {
   const [step, setStep] = useState<Step>("recipient");
   const [method, setMethod] = useState<PaymentMethod>("stripe");
@@ -337,6 +345,7 @@ export default function CheckoutModal({
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [invoiceLoading, setInvoiceLoading] = useState(false);
   const [invoiceError, setInvoiceError] = useState<string | null>(null);
+  const [cryptoNotice, setCryptoNotice] = useState<"cancelled" | "failed" | null>(null);
 
   useEffect(() => {
     if (!open) {
@@ -350,8 +359,60 @@ export default function CheckoutModal({
       setInvoice(null);
       setInvoiceLoading(false);
       setInvoiceError(null);
+      setCryptoNotice(null);
+      return;
     }
+    if (resumeOrderId) {
+      setMethod("crypto");
+      setRecipient(resumeRecipient ?? emptyRecipient);
+      setStep("confirming");
+    } else if (resumeCancelled) {
+      setMethod("crypto");
+      setRecipient(resumeRecipient ?? emptyRecipient);
+      setCryptoNotice("cancelled");
+      setStep("ready");
+    }
+    // resumeOrderId/resumeCancelled/resumeRecipient solo importan en el
+    // instante en que `open` pasa a true — Calculator ya limpió la URL y el
+    // sessionStorage para entonces, así que no hace falta re-ejecutar esto
+    // en cada render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  // Mientras esperamos la confirmación de MaxelPay: consulta el estado del
+  // pedido cada pocos segundos (no hay webhooks del navegador al cliente).
+  useEffect(() => {
+    if (step !== "confirming" || !resumeOrderId) return;
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/order-status/${resumeOrderId}`);
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (cancelled) return;
+        if (data.status === "paid") {
+          setSuccessInfo({ kind: "paid" });
+          setStep("success");
+          generateInvoice(recipient, "Cripto (MaxelPay)", resumeOrderId);
+        } else if (data.status === "failed") {
+          setCryptoNotice("failed");
+          setMethod("crypto");
+          setStep("ready");
+        }
+      } catch {
+        // Falla de red puntual: se reintenta en el próximo tick del interval.
+      }
+    };
+
+    poll();
+    const interval = setInterval(poll, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, resumeOrderId]);
 
   const generateInvoice = (
     recipientData: Recipient,
@@ -629,20 +690,28 @@ export default function CheckoutModal({
                     </>
                   )}
 
-                  {method === "usdc" && (
-                    <CryptoPayment
-                      amountUsd={amountUsd}
-                      totalUsd={totalUsd}
-                      countryName={country.name}
-                      deliveryLabel={deliveryLabel}
-                      recipient={recipient}
-                      onBack={() => setStep("recipient")}
-                      onSuccess={(reference) => {
-                        setSuccessInfo({ kind: "pending", reference, pendingVia: "usdc" });
-                        setStep("success");
-                        generateInvoice(recipient, "USDC (Solana)", reference);
-                      }}
-                    />
+                  {method === "crypto" && (
+                    <>
+                      {cryptoNotice && (
+                        <div className="mt-4 rounded-xl border border-lime-400/20 bg-lime-400/5 px-4 py-3 text-sm text-white/70">
+                          {cryptoNotice === "cancelled"
+                            ? "Cancelaste el pago en MaxelPay. Puedes intentarlo de nuevo cuando quieras."
+                            : "MaxelPay no pudo confirmar el pago. Intenta de nuevo o elige otro método."}
+                        </div>
+                      )}
+                      <CryptoPayment
+                        amountUsd={amountUsd}
+                        totalUsd={totalUsd}
+                        receivedAmount={receivedAmount}
+                        countryName={country.name}
+                        countryFlag={country.flag}
+                        currency={country.currency}
+                        deliveryLabel={deliveryLabel}
+                        recipient={recipient}
+                        promoCode={promoCode}
+                        onBack={() => setStep("recipient")}
+                      />
+                    </>
                   )}
 
                   {method === "eu_bank" && (
@@ -654,7 +723,7 @@ export default function CheckoutModal({
                       recipient={recipient}
                       onBack={() => setStep("recipient")}
                       onSuccess={(reference) => {
-                        setSuccessInfo({ kind: "pending", reference, pendingVia: "eu_bank" });
+                        setSuccessInfo({ kind: "pending", reference });
                         setStep("success");
                         generateInvoice(recipient, "Transferencia bancaria (Europa)", reference);
                       }}
@@ -672,6 +741,26 @@ export default function CheckoutModal({
                       }}
                     />
                   )}
+                </motion.div>
+              )}
+
+              {step === "confirming" && (
+                <motion.div
+                  key="confirming"
+                  initial={{ opacity: 0, x: 12 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -12 }}
+                  transition={{ duration: 0.25 }}
+                  className="flex flex-col items-center gap-3 py-10 text-center"
+                >
+                  <Loader2 size={28} className="animate-spin text-lime-300" />
+                  <p className="font-display text-lg font-semibold text-white">
+                    Confirmando tu pago con MaxelPay…
+                  </p>
+                  <p className="max-w-xs text-sm text-white/50">
+                    Esto puede tardar un momento mientras se acredita la
+                    transacción. No cierres esta ventana.
+                  </p>
                 </motion.div>
               )}
 
@@ -713,20 +802,15 @@ export default function CheckoutModal({
                     {successInfo?.kind === "test" ? (
                       <>
                         Este fue un envío de prueba: no se procesó ningún
-                        cargo real ni se contactó a Stripe o Solana. El resto
-                        del flujo (destinatario, tasas, comisión) funcionó
-                        igual que en un envío de verdad.
+                        cargo real ni se contactó a Stripe o MaxelPay. El
+                        resto del flujo (destinatario, tasas, comisión)
+                        funcionó igual que en un envío de verdad.
                       </>
                     ) : successInfo?.kind === "pending" ? (
                       <>
-                        {successInfo.pendingVia === "eu_bank"
-                          ? "Estamos verificando tu transferencia bancaria europea."
-                          : "Estamos verificando tu pago en USDC."}{" "}
-                        Apenas se confirme{" "}
-                        {successInfo.pendingVia === "eu_bank"
-                          ? "el ingreso a la cuenta"
-                          : "en la red Solana"}
-                        , {recipient.fullName ||
+                        Estamos verificando tu transferencia bancaria
+                        europea. Apenas se confirme el ingreso a la cuenta,{" "}
+                        {recipient.fullName ||
                           "tu destinatario"} en {country.flag} {country.name}{" "}
                         recibirá{" "}
                         {receivedAmount.toLocaleString("en-US", {

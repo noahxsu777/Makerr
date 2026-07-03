@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   BadgeCheck,
@@ -19,7 +19,42 @@ import { getFallbackRate } from "../lib/rates";
 import { useLiveRates } from "../lib/useLiveRates";
 import AnimatedNumber from "./AnimatedNumber";
 import CheckoutModal from "./CheckoutModal";
+import { CRYPTO_ORDER_STORAGE_KEY, type CryptoOrderContext } from "./CryptoPayment";
 import RelativeTime from "./RelativeTime";
+
+type ResumeState = {
+  orderId?: string;
+  cancelled: boolean;
+  context: CryptoOrderContext;
+};
+
+// Al volver del checkout hospedado de MaxelPay (ver CryptoPayment.tsx), la
+// navegación completa recarga la página y pierde todo el estado de React —
+// por eso el contexto del pedido se guardó en sessionStorage antes de salir,
+// y acá se recupera leyendo los query params que MaxelPay agrega al volver.
+function readMaxelPayResume(): ResumeState | null {
+  const params = new URLSearchParams(window.location.search);
+  const status = params.get("maxelpay");
+  const orderId = params.get("orderId");
+  if (!status || !orderId) return null;
+
+  const raw = window.sessionStorage.getItem(CRYPTO_ORDER_STORAGE_KEY);
+  window.sessionStorage.removeItem(CRYPTO_ORDER_STORAGE_KEY);
+  window.history.replaceState({}, "", window.location.pathname);
+  if (!raw) return null;
+
+  try {
+    const context: CryptoOrderContext = JSON.parse(raw);
+    if (context.orderId !== orderId) return null;
+    return {
+      orderId: status === "success" ? orderId : undefined,
+      cancelled: status === "cancel",
+      context,
+    };
+  } catch {
+    return null;
+  }
+}
 
 function getRate(country: Country, liveRates: Record<string, number> | null): number {
   if (country.currency === "USD") return 1;
@@ -37,6 +72,16 @@ export default function Calculator() {
   const [countryIdx, setCountryIdx] = useState(0);
   const [deliveryIdx, setDeliveryIdx] = useState(0);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [resume, setResume] = useState<ResumeState | null>(null);
+
+  useEffect(() => {
+    const resumed = readMaxelPayResume();
+    if (resumed) {
+      setResume(resumed);
+      setCheckoutOpen(true);
+    }
+  }, []);
+
   const country = countries[countryIdx];
   const delivery = deliverySpeeds[deliveryIdx];
   const {
@@ -376,14 +421,28 @@ export default function Calculator() {
 
       <CheckoutModal
         open={checkoutOpen}
-        onClose={() => setCheckoutOpen(false)}
-        amountUsd={amount}
-        feeUsd={fee}
-        totalUsd={total}
-        receivedAmount={received}
-        country={country}
-        deliveryLabel={delivery.label}
-        promoCode={appliedPromo?.code}
+        onClose={() => {
+          setCheckoutOpen(false);
+          setResume(null);
+        }}
+        amountUsd={resume?.context.amountUsd ?? amount}
+        feeUsd={resume?.context.feeUsd ?? fee}
+        totalUsd={resume?.context.totalUsd ?? total}
+        receivedAmount={resume?.context.receivedAmount ?? received}
+        country={
+          resume
+            ? {
+                name: resume.context.countryName,
+                flag: resume.context.countryFlag,
+                currency: resume.context.currency,
+              }
+            : country
+        }
+        deliveryLabel={resume?.context.deliveryLabel ?? delivery.label}
+        promoCode={resume?.context.promoCode ?? appliedPromo?.code}
+        resumeOrderId={resume?.orderId}
+        resumeCancelled={resume?.cancelled}
+        resumeRecipient={resume?.context.recipient}
       />
     </section>
   );

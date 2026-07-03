@@ -13,11 +13,22 @@ const distDir = path.join(__dirname, "..", "dist");
 const uploadsDir = path.join(__dirname, "uploads");
 mkdirSync(uploadsDir, { recursive: true });
 
-const { STRIPE_SECRET_KEY, PORT = 8787 } = process.env;
+const {
+  STRIPE_SECRET_KEY,
+  MAXELPAY_API_KEY,
+  MAXELPAY_API_URL = "https://api.maxelpay.com/api/api/v1/payments/sessions",
+  PORT = 8787,
+} = process.env;
 
 if (!STRIPE_SECRET_KEY) {
   console.warn(
     "[server] STRIPE_SECRET_KEY no está definida. Copia .env.example a .env y agrega tus claves de prueba de Stripe."
+  );
+}
+
+if (!MAXELPAY_API_KEY) {
+  console.warn(
+    "[server] MAXELPAY_API_KEY no está definida. Copia .env.example a .env y agrega tu clave de MaxelPay."
   );
 }
 
@@ -205,11 +216,139 @@ app.post("/api/create-payment-intent", async (req, res) => {
   }
 });
 
-// --- Pago manual con USDC (Solana) ---------------------------------------
-// No verificamos la transacción on-chain (eso requeriría correr un nodo o
-// pagar un indexador RPC). El flujo es: el usuario manda USDC a la wallet
-// de la app, sube una captura como comprobante, y queda en revisión manual.
-const cryptoUpload = multer({
+// --- Pago con cripto vía MaxelPay -----------------------------------------
+// A diferencia del resto de métodos manuales de esta app, MaxelPay procesa
+// el pago en su checkout hospedado y confirma por webhook — no hay revisión
+// manual. Como no hay base de datos, el estado del pedido vive en memoria
+// (se pierde si el servidor se reinicia; suficiente para esta demo).
+const cryptoOrders = new Map();
+
+app.post("/api/create-crypto-session", async (req, res) => {
+  if (!MAXELPAY_API_KEY) {
+    return res.status(503).json({
+      error: "MaxelPay no está configurado en el servidor. Agrega MAXELPAY_API_KEY en tu archivo .env.",
+    });
+  }
+
+  const {
+    amount,
+    countryName,
+    deliveryMethod,
+    recipientName,
+    recipientPhone,
+    recipientEmail,
+    recipientReference,
+    recipientBank,
+    recipientAccountType,
+    recipientDocumentType,
+    recipientDocumentNumber,
+    recipientBankCode,
+    promoCode,
+  } = req.body ?? {};
+
+  if (typeof amount !== "number" || amount < MIN_AMOUNT || amount > MAX_AMOUNT) {
+    return res.status(400).json({
+      error: `El monto debe estar entre $${MIN_AMOUNT} y $${MAX_AMOUNT} USD.`,
+    });
+  }
+
+  const fee = getTransferFee(amount);
+  const total = Math.round((amount + fee) * 100) / 100;
+  const orderId = randomUUID();
+  const origin = `${req.protocol}://${req.get("host")}`;
+
+  try {
+    const maxelRes = await fetch(MAXELPAY_API_URL, {
+      method: "POST",
+      headers: { "X-API-KEY": MAXELPAY_API_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        orderId,
+        amount: total,
+        currency: "USD",
+        description: `Envío Lukea a ${countryName}`,
+        successUrl: `${origin}/?maxelpay=success&orderId=${orderId}`,
+        cancelUrl: `${origin}/?maxelpay=cancel&orderId=${orderId}`,
+        callbackUrl: `${origin}/api/maxelpay-webhook`,
+      }),
+    });
+    const data = await maxelRes.json();
+    if (!maxelRes.ok || !data.success) {
+      throw new Error(data.message || data.error || "MaxelPay rechazó la sesión de pago.");
+    }
+
+    cryptoOrders.set(orderId, {
+      status: "pending",
+      createdAt: Date.now(),
+      amount,
+      fee,
+      total,
+      countryName: truncate(countryName),
+      deliveryMethod: truncate(deliveryMethod),
+      recipientName: truncate(recipientName),
+      recipientPhone: truncate(recipientPhone),
+      recipientEmail: truncate(recipientEmail),
+      recipientReference: truncate(recipientReference),
+      recipientBank: truncate(recipientBank),
+      recipientAccountType: truncate(recipientAccountType),
+      recipientDocumentType: truncate(recipientDocumentType),
+      recipientDocumentNumber: truncate(recipientDocumentNumber),
+      recipientBankCode: truncate(recipientBankCode),
+      promoCode: truncate(promoCode),
+    });
+
+    res.json({ orderId, paymentUrl: data.data.paymentUrl });
+  } catch (err) {
+    console.error("[server] Error creando sesión de MaxelPay:", err.message);
+    res.status(500).json({ error: "No se pudo iniciar el pago con MaxelPay. Intenta de nuevo." });
+  }
+});
+
+// MaxelPay llama a esta URL server-to-server cuando el estado del pago
+// cambia. No hay verificación de firma documentada por MaxelPay para
+// nuestra integración — si en el futuro exponen un secreto de firma, hay
+// que validarlo acá antes de confiar en el payload.
+app.post("/api/maxelpay-webhook", (req, res) => {
+  const body = req.body ?? {};
+  const orderId = body.orderId || body.order_id || body.data?.orderId;
+  const rawStatus = String(
+    body.status || body.paymentStatus || body.data?.status || ""
+  ).toLowerCase();
+
+  const order = orderId ? cryptoOrders.get(orderId) : null;
+  if (!order) {
+    console.warn("[server] Webhook de MaxelPay con orderId desconocido:", orderId, body);
+    return res.status(200).json({ received: true });
+  }
+
+  if (["success", "completed", "paid", "confirmed"].includes(rawStatus)) {
+    order.status = "paid";
+  } else if (["cancelled", "canceled", "expired", "failed"].includes(rawStatus)) {
+    order.status = "failed";
+  }
+  cryptoOrders.set(orderId, order);
+  console.log(`[server] Webhook MaxelPay: pedido ${orderId} → ${order.status}`);
+
+  res.status(200).json({ received: true });
+});
+
+app.get("/api/order-status/:orderId", (req, res) => {
+  const order = cryptoOrders.get(req.params.orderId);
+  if (!order) {
+    return res.status(404).json({ error: "Pedido no encontrado." });
+  }
+  res.json({
+    status: order.status,
+    amount: order.amount,
+    fee: order.fee,
+    total: order.total,
+    countryName: order.countryName,
+    deliveryMethod: order.deliveryMethod,
+    recipientName: order.recipientName,
+    recipientReference: order.recipientReference,
+  });
+});
+
+const proofUpload = multer({
   storage: multer.diskStorage({
     destination: uploadsDir,
     filename: (_req, file, cb) => {
@@ -226,60 +365,12 @@ const cryptoUpload = multer({
   },
 });
 
-app.post("/api/crypto-payment", cryptoUpload.single("proof"), (req, res) => {
-  const {
-    amount,
-    countryName,
-    deliveryMethod,
-    recipientName,
-    recipientPhone,
-    recipientEmail,
-    recipientReference,
-    recipientBank,
-    recipientAccountType,
-    recipientDocumentType,
-    recipientDocumentNumber,
-    recipientBankCode,
-  } = req.body ?? {};
-
-  const amountNum = Number(amount);
-  if (!Number.isFinite(amountNum) || amountNum < MIN_AMOUNT || amountNum > MAX_AMOUNT) {
-    return res.status(400).json({
-      error: `El monto debe estar entre $${MIN_AMOUNT} y $${MAX_AMOUNT} USD.`,
-    });
-  }
-  if (!req.file) {
-    return res.status(400).json({ error: "Adjunta una captura del pago para continuar." });
-  }
-
-  const fee = getTransferFee(amountNum);
-  const total = Math.round((amountNum + fee) * 100) / 100;
-  const reference = randomUUID();
-
-  console.log(
-    `[server] Pago con USDC pendiente de revisión ${reference}: $${total} · ${truncate(recipientName)} · ${truncate(countryName)} · comprobante ${req.file.filename}`,
-    {
-      deliveryMethod: truncate(deliveryMethod),
-      recipientPhone: truncate(recipientPhone),
-      recipientEmail: truncate(recipientEmail),
-      recipientReference: truncate(recipientReference),
-      recipientBank: truncate(recipientBank),
-      recipientAccountType: truncate(recipientAccountType),
-      recipientDocumentType: truncate(recipientDocumentType),
-      recipientDocumentNumber: truncate(recipientDocumentNumber),
-      recipientBankCode: truncate(recipientBankCode),
-    }
-  );
-
-  res.json({ reference, status: "pending_review", fee, total });
-});
-
 // --- Pago manual por transferencia bancaria europea ----------------------
 // Para remitentes en Europa que no tienen tarjeta o cuenta de EE.UU. para
 // pagar vía Stripe: transfieren a la cuenta receptora de Lukea (IBAN/SWIFT
-// en Reino Unido) y suben comprobante, igual que el flujo de USDC — sin
-// verificación automática, queda pendiente de revisión manual.
-app.post("/api/eu-bank-transfer", cryptoUpload.single("proof"), (req, res) => {
+// en Reino Unido) y suben comprobante — sin verificación automática, queda
+// pendiente de revisión manual.
+app.post("/api/eu-bank-transfer", proofUpload.single("proof"), (req, res) => {
   const {
     amount,
     countryName,
@@ -348,6 +439,7 @@ app.get("/api/health", (_req, res) => {
   res.json({
     ok: true,
     stripeConfigured: Boolean(stripe),
+    maxelpayConfigured: Boolean(MAXELPAY_API_KEY),
     ratesCached: Boolean(ratesCache.data),
     ratesFetchedAt: ratesCache.fetchedAt ? new Date(ratesCache.fetchedAt).toISOString() : null,
   });

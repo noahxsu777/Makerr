@@ -10,8 +10,8 @@ const announcements = [
   },
   {
     date: "Julio 2026",
-    title: "Ahora se puede pagar con USDC en la red Solana",
-    desc: "Lukea suma una segunda forma de pago junto a Stripe: transferencias en USDC vía Solana Pay, con verificación manual de comprobante.",
+    title: "Ahora se puede pagar en cripto con MaxelPay",
+    desc: "Lukea suma una segunda forma de pago junto a Stripe: checkout en cripto hospedado por MaxelPay, con confirmación automática.",
   },
   {
     date: "Junio 2026",
@@ -54,7 +54,7 @@ export default function Press() {
                 Lukea es una plataforma de envío de dinero hecha en Estados
                 Unidos para la comunidad latina. Ofrece tasas de cambio en
                 tiempo real con margen transparente, ocho formas de entrega
-                en 21 países, y pago con tarjeta, cuenta bancaria o USDC.
+                en 21 países, y pago con tarjeta, cuenta bancaria o cripto.
                 Boilerplate libre de usar en artículos y menciones.
               </p>
             </motion.div>

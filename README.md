@@ -14,8 +14,9 @@ con Stripe (tarjeta o cuenta bancaria vía ACH).
 - Códigos promocionales (`LUKEA10`, `BIENVENIDO`, `AHORRA5`) con descuento animado sobre el costo de envío
 - Tasas de cambio en tiempo real vía exchangerate.fun (con margen de Lukea del 2.5% aplicado) con respaldo automático si la API externa falla
 - Checkout funcional con Stripe: tarjeta de crédito/débito o cuenta bancaria (ACH)
-- Pago alternativo en USDC por la red Solana, con QR (Solana Pay) y verificación manual por captura de pantalla
-- Modo "Prueba" que simula un pago exitoso sin llamar a Stripe ni Solana, para probar el flujo completo sin credenciales
+- Pago alternativo en cripto vía MaxelPay (checkout hospedado + confirmación automática por webhook)
+- Transferencia bancaria manual para remitentes en Europa (IBAN/SWIFT), con comprobante y revisión manual
+- Modo "Prueba" que simula un pago exitoso sin llamar a Stripe ni MaxelPay, para probar el flujo completo sin credenciales
 - Factura simulada (número consecutivo, detalle completo) que se genera y se muestra dentro de la app al completar cualquier método de pago — sin PDF, todo en línea
 - Formulario de destinatario con campos específicos por país (CCI en Perú, tipo de documento/cuenta en Colombia, CLABE en México)
 - Sección "Cómo funciona" con revelado por scroll
@@ -74,23 +75,38 @@ Sin estas claves, el botón de pago sigue funcionando pero muestra un aviso de
 
 Tarjeta de prueba: `4242 4242 4242 4242`, cualquier fecha futura y CVC.
 
-## Configurar pago con USDC (Solana)
+## Configurar pago con cripto (MaxelPay)
 
-En el paso de pago, además de Stripe, el usuario puede elegir "USDC (Solana)":
-se le muestra un QR (con el formato [Solana Pay](https://docs.solanapay.com/),
-así la wallet abre ya con el monto exacto en USDC prellenado), la dirección
-para copiar manualmente, y un campo para subir una captura de pantalla como
-comprobante. No hay verificación on-chain automática — el pago queda
-"pendiente de revisión" y el comprobante se guarda en `server/uploads/`
-(no se sube a git) para que lo revises a mano.
+En el paso de pago, además de Stripe, el usuario puede elegir "Cripto
+(MaxelPay)": el backend (`POST /api/create-crypto-session`) crea una sesión
+de pago en la API de [MaxelPay](https://maxelpay.com) y redirige al usuario
+al checkout hospedado de MaxelPay. Al terminar (pagado o cancelado), MaxelPay
+regresa al usuario a la app, y MaxelPay confirma el pago de forma asíncrona
+llamando a `POST /api/maxelpay-webhook`. Mientras tanto, la app consulta
+`GET /api/order-status/:orderId` cada pocos segundos hasta ver la
+confirmación — no hay revisión manual en este método.
+
+Como no hay base de datos, el estado de cada pedido vive en memoria en el
+proceso de Express (`server/index.js`) y se pierde si el servidor se
+reinicia — suficiente para esta demo, pero no para producción real.
 
 1. Copia el archivo de ejemplo si no lo has hecho: `cp .env.example .env`
-2. Agrega la wallet de Solana que va a recibir los fondos en
-   `VITE_SOLANA_USDC_ADDRESS` (es una dirección pública, no un secreto — la
-   misma que se muestra en el QR).
+2. Agrega tu clave de API de MaxelPay en `MAXELPAY_API_KEY` (nunca la
+   expongas en el frontend — solo se usa desde `server/index.js`).
+3. Si MaxelPay te da una URL de API distinta a la de por defecto, ajusta
+   `MAXELPAY_API_URL`.
 
-Sin esa variable, la pestaña de USDC muestra un aviso de "no configurado" en
-vez de un QR roto.
+Sin `MAXELPAY_API_KEY`, la pestaña de cripto muestra un aviso de "no
+configurado" al intentar pagar.
+
+## Configurar transferencia bancaria europea
+
+Para remitentes en Europa sin tarjeta o cuenta de EE.UU. para pagar vía
+Stripe, hay un método adicional: transferir por IBAN/SWIFT a la cuenta
+receptora de Lukea y subir un comprobante. Igual que MaxelPay antes de
+tener webhook, esto queda "pendiente de revisión" manual — el comprobante
+se guarda en `server/uploads/` (no se sube a git). La cuenta receptora está
+fija en `src/lib/euBankTransfer.ts`.
 
 ## Desarrollo
 
