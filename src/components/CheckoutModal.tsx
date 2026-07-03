@@ -18,6 +18,8 @@ import {
   Check,
   CreditCard,
   Coins,
+  FlaskConical,
+  Sparkles,
 } from "lucide-react";
 import { isStripeConfigured, stripePromise } from "../lib/stripe";
 import RecipientForm, { type Recipient } from "./RecipientForm";
@@ -37,8 +39,8 @@ type Props = {
 };
 
 type Step = "recipient" | "ready" | "success";
-type PaymentMethod = "stripe" | "usdc";
-type SuccessInfo = { kind: "paid" | "pending"; reference?: string };
+type PaymentMethod = "stripe" | "usdc" | "test";
+type SuccessInfo = { kind: "paid" | "pending" | "test"; reference?: string };
 
 const emptyRecipient: Recipient = {
   fullName: "",
@@ -132,10 +134,11 @@ function MethodTabs({
   const tabs: { id: PaymentMethod; label: string; icon: typeof CreditCard }[] = [
     { id: "stripe", label: "Tarjeta o banco", icon: CreditCard },
     { id: "usdc", label: "USDC (Solana)", icon: Coins },
+    { id: "test", label: "Prueba", icon: FlaskConical },
   ];
 
   return (
-    <div className="mt-4 grid grid-cols-2 gap-2">
+    <div className="mt-4 grid grid-cols-3 gap-2">
       {tabs.map((tab) => {
         const active = method === tab.id;
         return (
@@ -143,14 +146,14 @@ function MethodTabs({
             key={tab.id}
             type="button"
             onClick={() => onChange(tab.id)}
-            className={`flex items-center justify-center gap-2 rounded-xl border px-3 py-3 text-sm font-semibold transition-colors ${
+            className={`flex items-center justify-center gap-1.5 rounded-xl border px-2 py-3 text-xs font-semibold transition-colors sm:text-sm ${
               active
                 ? "border-lime-400/50 bg-lime-400/10 text-lime-300"
                 : "border-white/10 text-white/50 hover:border-white/20 hover:text-white/80"
             }`}
           >
-            <tab.icon size={15} />
-            {tab.label}
+            <tab.icon size={15} className="shrink-0" />
+            <span className="truncate">{tab.label}</span>
           </button>
         );
       })}
@@ -242,6 +245,63 @@ function PaymentForm({
         Pagos procesados de forma segura por Stripe
       </p>
     </form>
+  );
+}
+
+function TestPaymentPanel({
+  amountLabel,
+  onSuccess,
+  onBack,
+}: {
+  amountLabel: string;
+  onSuccess: () => void;
+  onBack: () => void;
+}) {
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleClick = () => {
+    setSubmitting(true);
+    setTimeout(onSuccess, 900);
+  };
+
+  return (
+    <div className="mt-4">
+      <button
+        type="button"
+        onClick={onBack}
+        className="mb-4 flex items-center gap-1.5 text-xs font-medium text-white/45 transition-colors hover:text-white"
+      >
+        <ArrowLeft size={13} />
+        Editar destinatario
+      </button>
+
+      <div className="flex flex-col items-center rounded-2xl border border-lime-400/20 bg-lime-400/5 p-6 text-center">
+        <span className="grid h-12 w-12 place-items-center rounded-full bg-lime-400/15 text-lime-300">
+          <Sparkles size={22} />
+        </span>
+        <p className="mt-3 font-semibold text-lime-300">Modo de prueba</p>
+        <p className="mt-1 text-sm leading-relaxed text-white/60">
+          No se hace ningún cargo real ni se contacta a Stripe o Solana. Sirve
+          para probar el flujo completo del checkout de punta a punta.
+        </p>
+      </div>
+
+      <button
+        type="button"
+        onClick={handleClick}
+        disabled={submitting}
+        className="mt-6 flex w-full items-center justify-center gap-2 rounded-full bg-gradient-to-r from-lime-400 to-emerald-400 py-4 font-display text-base font-bold text-ink-950 transition-transform hover:scale-[1.01] active:scale-[0.99] disabled:opacity-60 disabled:hover:scale-100"
+      >
+        {submitting ? (
+          <>
+            <Loader2 size={18} className="animate-spin" />
+            Simulando pago…
+          </>
+        ) : (
+          `Simular pago de ${amountLabel}`
+        )}
+      </button>
+    </div>
   );
 }
 
@@ -517,6 +577,17 @@ export default function CheckoutModal({
                       }}
                     />
                   )}
+
+                  {method === "test" && (
+                    <TestPaymentPanel
+                      amountLabel={`$${totalUsd.toFixed(2)}`}
+                      onBack={() => setStep("recipient")}
+                      onSuccess={() => {
+                        setSuccessInfo({ kind: "test" });
+                        setStep("success");
+                      }}
+                    />
+                  )}
                 </motion.div>
               )}
 
@@ -534,11 +605,15 @@ export default function CheckoutModal({
                     className={`grid h-16 w-16 place-items-center rounded-full ${
                       successInfo?.kind === "pending"
                         ? "bg-emerald-400/15 text-emerald-400"
-                        : "bg-lime-400/15 text-lime-300"
+                        : successInfo?.kind === "test"
+                          ? "bg-white/10 text-white/70"
+                          : "bg-lime-400/15 text-lime-300"
                     }`}
                   >
                     {successInfo?.kind === "pending" ? (
                       <Clock3 size={32} />
+                    ) : successInfo?.kind === "test" ? (
+                      <FlaskConical size={32} />
                     ) : (
                       <CheckCircle2 size={32} />
                     )}
@@ -546,10 +621,19 @@ export default function CheckoutModal({
                   <h3 className="mt-5 font-display text-2xl font-bold text-white">
                     {successInfo?.kind === "pending"
                       ? "Comprobante recibido"
-                      : "¡Envío en camino!"}
+                      : successInfo?.kind === "test"
+                        ? "Simulación completada"
+                        : "¡Envío en camino!"}
                   </h3>
                   <p className="mt-2 max-w-xs text-sm text-white/55">
-                    {successInfo?.kind === "pending" ? (
+                    {successInfo?.kind === "test" ? (
+                      <>
+                        Este fue un envío de prueba: no se procesó ningún
+                        cargo real ni se contactó a Stripe o Solana. El resto
+                        del flujo (destinatario, tasas, comisión) funcionó
+                        igual que en un envío de verdad.
+                      </>
+                    ) : successInfo?.kind === "pending" ? (
                       <>
                         Estamos verificando tu pago en USDC. Apenas se
                         confirme en la red Solana, {recipient.fullName ||
