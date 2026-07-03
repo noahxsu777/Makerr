@@ -1,7 +1,7 @@
 import "dotenv/config";
 import path from "node:path";
 import { existsSync, mkdirSync } from "node:fs";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHmac } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import cors from "cors";
@@ -15,8 +15,10 @@ mkdirSync(uploadsDir, { recursive: true });
 
 const {
   STRIPE_SECRET_KEY,
-  MAXELPAY_API_KEY,
-  MAXELPAY_API_URL = "https://api.maxelpay.com/api/api/v1/payments/sessions",
+  PAYMENTO_API_KEY,
+  PAYMENTO_IPN_SECRET,
+  PAYMENTO_API_BASE_URL = "https://api.paymento.io",
+  PAYMENTO_GATEWAY_BASE_URL = "https://app.paymento.io/gateway",
   PORT = 8787,
 } = process.env;
 
@@ -26,9 +28,15 @@ if (!STRIPE_SECRET_KEY) {
   );
 }
 
-if (!MAXELPAY_API_KEY) {
+if (!PAYMENTO_API_KEY) {
   console.warn(
-    "[server] MAXELPAY_API_KEY no está definida. Copia .env.example a .env y agrega tu clave de MaxelPay."
+    "[server] PAYMENTO_API_KEY no está definida. Copia .env.example a .env y agrega tu clave de Paymento."
+  );
+}
+
+if (!PAYMENTO_IPN_SECRET) {
+  console.warn(
+    "[server] PAYMENTO_IPN_SECRET no está definida — no se podrá verificar la firma de los webhooks de Paymento."
   );
 }
 
@@ -36,7 +44,9 @@ const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+// El callback (IPN) de Paymento firma el body crudo con HMAC-SHA256 — hay
+// que guardarlo tal cual antes de que este middleware lo parsee a JSON.
+app.use(express.json({ verify: (req, _res, buf) => { req.rawBody = buf; } }));
 
 // Mantener en sync con src/lib/fees.ts
 const MIN_AMOUNT = 10;
@@ -216,17 +226,45 @@ app.post("/api/create-payment-intent", async (req, res) => {
   }
 });
 
-// --- Pago con cripto vía MaxelPay -----------------------------------------
-// A diferencia del resto de métodos manuales de esta app, MaxelPay procesa
-// el pago en su checkout hospedado y confirma por webhook — no hay revisión
-// manual. Como no hay base de datos, el estado del pedido vive en memoria
-// (se pierde si el servidor se reinicia; suficiente para esta demo).
+// --- Pago con cripto vía Paymento -----------------------------------------
+// A diferencia del resto de métodos manuales de esta app, Paymento procesa
+// el pago en su checkout hospedado. Paymento solo da una `returnUrl` (no
+// distingue éxito de cancelación en la redirección) y su propia doc dice
+// que el redirect es solo informativo — la fuente de verdad es el webhook
+// (IPN, firmado con HMAC) más la API de verify, así que /api/order-status
+// llama a verify activamente en vez de esperar pasivamente el webhook (que
+// además no puede alcanzar un servidor en localhost). Como no hay base de
+// datos, el estado del pedido vive en memoria (se pierde si el servidor se
+// reinicia; suficiente para esta demo).
 const cryptoOrders = new Map();
 
+// https://api.paymento.io/v1/payment/verify — swagger: OrderStatus 0..9,
+// pero solo 7 (Paid) documentado como estado de éxito; 4 (Timeout),
+// 5 (UserCanceled) y 9 (Reject) como estados terminales de fallo. El resto
+// (0,1,2,3,8) se trata como "todavía procesando".
+function mapPaymentoStatus(orderStatus) {
+  if (orderStatus === 7) return "paid";
+  if ([4, 5, 9].includes(orderStatus)) return "failed";
+  return "pending";
+}
+
+async function verifyPaymentoOrder(token) {
+  const res = await fetch(`${PAYMENTO_API_BASE_URL}/v1/payment/verify`, {
+    method: "POST",
+    headers: { "Api-Key": PAYMENTO_API_KEY, "Content-Type": "application/json" },
+    body: JSON.stringify({ token }),
+  });
+  const data = await res.json();
+  if (!data.success) {
+    throw new Error(data.message || "No se pudo verificar el pago con Paymento.");
+  }
+  return data.body;
+}
+
 app.post("/api/create-crypto-session", async (req, res) => {
-  if (!MAXELPAY_API_KEY) {
+  if (!PAYMENTO_API_KEY) {
     return res.status(503).json({
-      error: "MaxelPay no está configurado en el servidor. Agrega MAXELPAY_API_KEY en tu archivo .env.",
+      error: "Paymento no está configurado en el servidor. Agrega PAYMENTO_API_KEY en tu archivo .env.",
     });
   }
 
@@ -258,27 +296,27 @@ app.post("/api/create-crypto-session", async (req, res) => {
   const origin = `${req.protocol}://${req.get("host")}`;
 
   try {
-    const maxelRes = await fetch(MAXELPAY_API_URL, {
+    const paymentoRes = await fetch(`${PAYMENTO_API_BASE_URL}/v1/payment/request`, {
       method: "POST",
-      headers: { "X-API-KEY": MAXELPAY_API_KEY, "Content-Type": "application/json" },
+      headers: { "Api-Key": PAYMENTO_API_KEY, "Content-Type": "application/json" },
       body: JSON.stringify({
+        fiatAmount: total.toFixed(2),
+        fiatCurrency: "USD",
+        returnUrl: `${origin}/?paymento=return&orderId=${orderId}`,
         orderId,
-        amount: total,
-        currency: "USD",
-        description: `Envío Lukea a ${countryName}`,
-        successUrl: `${origin}/?maxelpay=success&orderId=${orderId}`,
-        cancelUrl: `${origin}/?maxelpay=cancel&orderId=${orderId}`,
-        callbackUrl: `${origin}/api/maxelpay-webhook`,
+        riskSpeed: 1, // esperar confirmaciones antes de dar el pago por bueno
       }),
     });
-    const data = await maxelRes.json();
-    if (!maxelRes.ok || !data.success) {
-      throw new Error(data.message || data.error || "MaxelPay rechazó la sesión de pago.");
+    const data = await paymentoRes.json();
+    if (!paymentoRes.ok || !data.success || !data.body) {
+      throw new Error(data.message || "Paymento rechazó la sesión de pago.");
     }
 
+    const token = data.body;
     cryptoOrders.set(orderId, {
       status: "pending",
       createdAt: Date.now(),
+      token,
       amount,
       fee,
       total,
@@ -296,46 +334,62 @@ app.post("/api/create-crypto-session", async (req, res) => {
       promoCode: truncate(promoCode),
     });
 
-    res.json({ orderId, paymentUrl: data.data.paymentUrl });
+    res.json({ orderId, paymentUrl: `${PAYMENTO_GATEWAY_BASE_URL}?token=${encodeURIComponent(token)}` });
   } catch (err) {
-    console.error("[server] Error creando sesión de MaxelPay:", err.message);
-    res.status(500).json({ error: "No se pudo iniciar el pago con MaxelPay. Intenta de nuevo." });
+    console.error("[server] Error creando sesión de Paymento:", err.message);
+    res.status(500).json({ error: "No se pudo iniciar el pago con Paymento. Intenta de nuevo." });
   }
 });
 
-// MaxelPay llama a esta URL server-to-server cuando el estado del pago
-// cambia. No hay verificación de firma documentada por MaxelPay para
-// nuestra integración — si en el futuro exponen un secreto de firma, hay
-// que validarlo acá antes de confiar en el payload.
-app.post("/api/maxelpay-webhook", (req, res) => {
-  const body = req.body ?? {};
-  const orderId = body.orderId || body.order_id || body.data?.orderId;
-  const rawStatus = String(
-    body.status || body.paymentStatus || body.data?.status || ""
-  ).toLowerCase();
+// Paymento llama a esta URL server-to-server (IPN) cuando el estado del
+// pago cambia. Hay que configurarla manualmente como "IPN URL" en el
+// dashboard de Paymento apuntando a "<tu dominio>/api/paymento-webhook" —
+// la API de creación de sesión no acepta una URL de callback por request.
+app.post("/api/paymento-webhook", (req, res) => {
+  if (PAYMENTO_IPN_SECRET) {
+    const signature = req.get("X-HMAC-SHA256-SIGNATURE");
+    const expected = req.rawBody
+      ? createHmac("sha256", PAYMENTO_IPN_SECRET).update(req.rawBody).digest("hex").toUpperCase()
+      : null;
+    if (!signature || !expected || signature.toUpperCase() !== expected) {
+      console.warn("[server] Webhook de Paymento con firma inválida, se ignora.");
+      return res.status(401).json({ error: "Firma inválida." });
+    }
+  }
 
-  const order = orderId ? cryptoOrders.get(orderId) : null;
+  const { OrderId, OrderStatus } = req.body ?? {};
+  const order = OrderId ? cryptoOrders.get(OrderId) : null;
   if (!order) {
-    console.warn("[server] Webhook de MaxelPay con orderId desconocido:", orderId, body);
+    console.warn("[server] Webhook de Paymento con orderId desconocido:", OrderId);
     return res.status(200).json({ received: true });
   }
 
-  if (["success", "completed", "paid", "confirmed"].includes(rawStatus)) {
-    order.status = "paid";
-  } else if (["cancelled", "canceled", "expired", "failed"].includes(rawStatus)) {
-    order.status = "failed";
-  }
-  cryptoOrders.set(orderId, order);
-  console.log(`[server] Webhook MaxelPay: pedido ${orderId} → ${order.status}`);
+  order.status = mapPaymentoStatus(Number(OrderStatus));
+  cryptoOrders.set(OrderId, order);
+  console.log(`[server] Webhook Paymento: pedido ${OrderId} → ${order.status}`);
 
   res.status(200).json({ received: true });
 });
 
-app.get("/api/order-status/:orderId", (req, res) => {
+app.get("/api/order-status/:orderId", async (req, res) => {
   const order = cryptoOrders.get(req.params.orderId);
   if (!order) {
     return res.status(404).json({ error: "Pedido no encontrado." });
   }
+
+  // El webhook puede no llegar nunca en desarrollo local (Paymento no puede
+  // alcanzar localhost), así que además de esperarlo, consultamos verify
+  // activamente mientras el pedido siga pendiente.
+  if (order.status === "pending" && PAYMENTO_API_KEY) {
+    try {
+      const verified = await verifyPaymentoOrder(order.token);
+      order.status = mapPaymentoStatus(Number(verified.orderStatus));
+      cryptoOrders.set(req.params.orderId, order);
+    } catch (err) {
+      console.warn("[server] No se pudo verificar el pedido con Paymento:", err.message);
+    }
+  }
+
   res.json({
     status: order.status,
     amount: order.amount,
@@ -439,7 +493,7 @@ app.get("/api/health", (_req, res) => {
   res.json({
     ok: true,
     stripeConfigured: Boolean(stripe),
-    maxelpayConfigured: Boolean(MAXELPAY_API_KEY),
+    paymentoConfigured: Boolean(PAYMENTO_API_KEY),
     ratesCached: Boolean(ratesCache.data),
     ratesFetchedAt: ratesCache.fetchedAt ? new Date(ratesCache.fetchedAt).toISOString() : null,
   });

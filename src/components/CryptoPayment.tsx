@@ -19,7 +19,7 @@ export type CryptoOrderContext = {
   promoCode?: string;
 };
 
-export const CRYPTO_ORDER_STORAGE_KEY = "lukea_maxelpay_order";
+export const CRYPTO_ORDER_STORAGE_KEY = "lukea_crypto_order";
 
 type Props = {
   amountUsd: number;
@@ -74,7 +74,7 @@ export default function CryptoPayment({
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "No se pudo iniciar el pago con MaxelPay.");
+      if (!res.ok) throw new Error(data.error || "No se pudo iniciar el pago con Paymento.");
 
       const context: CryptoOrderContext = {
         orderId: data.orderId,
@@ -114,13 +114,13 @@ export default function CryptoPayment({
 
       <div className="flex flex-col items-center rounded-2xl border border-white/10 bg-white/[0.03] p-6 text-center">
         <p className="text-sm text-white/60">
-          Vas a pagar con cripto a través de MaxelPay
+          Vas a pagar con cripto a través de Paymento
         </p>
         <p className="mt-2 font-display text-2xl font-bold text-lime-300">
           ${totalUsd.toFixed(2)}
         </p>
         <p className="mt-3 text-xs leading-relaxed text-white/40">
-          Te llevamos a la página segura de MaxelPay para elegir tu moneda y
+          Te llevamos a la página segura de Paymento para elegir tu moneda y
           completar el pago. Al confirmar, vuelves aquí automáticamente.
         </p>
       </div>
@@ -141,7 +141,7 @@ export default function CryptoPayment({
         {submitting ? (
           <>
             <Loader2 size={18} className="animate-spin" />
-            Abriendo MaxelPay…
+            Abriendo Paymento…
           </>
         ) : (
           <>
@@ -156,7 +156,7 @@ export default function CryptoPayment({
         animate={{ opacity: 1 }}
         className="mt-4 text-center text-xs text-white/35"
       >
-        Procesado por MaxelPay. Confirmamos tu pago automáticamente en
+        Procesado por Paymento. Confirmamos tu pago automáticamente en
         cuanto la transacción se acredita.
       </motion.p>
     </div>

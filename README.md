@@ -14,9 +14,9 @@ con Stripe (tarjeta o cuenta bancaria vía ACH).
 - Códigos promocionales (`LUKEA10`, `BIENVENIDO`, `AHORRA5`) con descuento animado sobre el costo de envío
 - Tasas de cambio en tiempo real vía exchangerate.fun (con margen de Lukea del 2.5% aplicado) con respaldo automático si la API externa falla
 - Checkout funcional con Stripe: tarjeta de crédito/débito o cuenta bancaria (ACH)
-- Pago alternativo en cripto vía MaxelPay (checkout hospedado + confirmación automática por webhook)
+- Pago alternativo en cripto vía Paymento (checkout hospedado + confirmación por webhook firmado con HMAC y verificación activa)
 - Transferencia bancaria manual para remitentes en Europa (IBAN/SWIFT), con comprobante y revisión manual
-- Modo "Prueba" que simula un pago exitoso sin llamar a Stripe ni MaxelPay, para probar el flujo completo sin credenciales
+- Modo "Prueba" que simula un pago exitoso sin llamar a Stripe ni Paymento, para probar el flujo completo sin credenciales
 - Factura simulada (número consecutivo, detalle completo) que se genera y se muestra dentro de la app al completar cualquier método de pago — sin PDF, todo en línea
 - Formulario de destinatario con campos específicos por país (CCI en Perú, tipo de documento/cuenta en Colombia, CLABE en México)
 - Sección "Cómo funciona" con revelado por scroll
@@ -75,38 +75,49 @@ Sin estas claves, el botón de pago sigue funcionando pero muestra un aviso de
 
 Tarjeta de prueba: `4242 4242 4242 4242`, cualquier fecha futura y CVC.
 
-## Configurar pago con cripto (MaxelPay)
+## Configurar pago con cripto (Paymento)
 
 En el paso de pago, además de Stripe, el usuario puede elegir "Cripto
-(MaxelPay)": el backend (`POST /api/create-crypto-session`) crea una sesión
-de pago en la API de [MaxelPay](https://maxelpay.com) y redirige al usuario
-al checkout hospedado de MaxelPay. Al terminar (pagado o cancelado), MaxelPay
-regresa al usuario a la app, y MaxelPay confirma el pago de forma asíncrona
-llamando a `POST /api/maxelpay-webhook`. Mientras tanto, la app consulta
-`GET /api/order-status/:orderId` cada pocos segundos hasta ver la
-confirmación — no hay revisión manual en este método.
+(Paymento)": el backend (`POST /api/create-crypto-session`) crea una sesión
+de pago vía [Paymento](https://paymento.io) (`POST /v1/payment/request`) y
+redirige al usuario al checkout hospedado de Paymento
+(`app.paymento.io/gateway?token=...`). Paymento solo da una `returnUrl`
+única (no distingue éxito de cancelación en la redirección — su propia
+documentación dice que el redirect es solo informativo), así que al volver
+la app siempre entra en un paso "confirmando" y consulta
+`GET /api/order-status/:orderId`, que a su vez llama a la API de verify de
+Paymento (`POST /v1/payment/verify`) mientras el pedido siga pendiente.
+Además, Paymento puede notificar antes por webhook (IPN) a
+`POST /api/paymento-webhook`, firmado con HMAC-SHA256
+(`X-HMAC-SHA256-SIGNATURE`, verificado con `PAYMENTO_IPN_SECRET`) — pero
+como esa URL no puede alcanzar `localhost`, el polling contra verify es lo
+que garantiza que esto funcione también en desarrollo.
 
 Como no hay base de datos, el estado de cada pedido vive en memoria en el
 proceso de Express (`server/index.js`) y se pierde si el servidor se
 reinicia — suficiente para esta demo, pero no para producción real.
 
 1. Copia el archivo de ejemplo si no lo has hecho: `cp .env.example .env`
-2. Agrega tu clave de API de MaxelPay en `MAXELPAY_API_KEY` (nunca la
+2. Agrega tu clave de API de Paymento en `PAYMENTO_API_KEY` (nunca la
    expongas en el frontend — solo se usa desde `server/index.js`).
-3. Si MaxelPay te da una URL de API distinta a la de por defecto, ajusta
-   `MAXELPAY_API_URL`.
+3. Agrega el secreto de firma de tus webhooks en `PAYMENTO_IPN_SECRET`
+   (lo genera Paymento en su dashboard de merchant).
+4. **Paso manual obligatorio:** en el dashboard de Paymento, configura la
+   "IPN URL" apuntando a `https://<tu-dominio-en-producción>/api/paymento-webhook`
+   — la API de creación de sesión no acepta esa URL por request, se
+   configura una sola vez por cuenta de merchant.
 
-Sin `MAXELPAY_API_KEY`, la pestaña de cripto muestra un aviso de "no
+Sin `PAYMENTO_API_KEY`, la pestaña de cripto muestra un aviso de "no
 configurado" al intentar pagar.
 
 ## Configurar transferencia bancaria europea
 
 Para remitentes en Europa sin tarjeta o cuenta de EE.UU. para pagar vía
 Stripe, hay un método adicional: transferir por IBAN/SWIFT a la cuenta
-receptora de Lukea y subir un comprobante. Igual que MaxelPay antes de
-tener webhook, esto queda "pendiente de revisión" manual — el comprobante
-se guarda en `server/uploads/` (no se sube a git). La cuenta receptora está
-fija en `src/lib/euBankTransfer.ts`.
+receptora de Lukea y subir un comprobante. A diferencia de Paymento, esto
+no tiene confirmación automática — queda "pendiente de revisión" manual, y
+el comprobante se guarda en `server/uploads/` (no se sube a git). La cuenta
+receptora está fija en `src/lib/euBankTransfer.ts`.
 
 ## Desarrollo
 

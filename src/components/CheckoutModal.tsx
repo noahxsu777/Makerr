@@ -41,11 +41,12 @@ type Props = {
   country: Country;
   deliveryLabel: string;
   promoCode?: string;
-  // Presentes cuando el usuario vuelve del checkout hospedado de MaxelPay
-  // (ver Calculator.tsx): la navegación completa a MaxelPay y de vuelta
+  // Presentes cuando el usuario vuelve del checkout hospedado de Paymento
+  // (ver Calculator.tsx): la navegación completa a Paymento y de vuelta
   // destruye el estado de este modal, así que se reconstruye desde acá.
+  // Paymento no distingue éxito de cancelación en su única returnUrl, así
+  // que siempre se resume hacia "confirming" y el polling decide el resto.
   resumeOrderId?: string;
-  resumeCancelled?: boolean;
   resumeRecipient?: Recipient;
 };
 
@@ -148,7 +149,7 @@ function MethodTabs({
 }) {
   const tabs: { id: PaymentMethod; label: string; icon: typeof CreditCard }[] = [
     { id: "stripe", label: "Tarjeta o banco", icon: CreditCard },
-    { id: "crypto", label: "Cripto (MaxelPay)", icon: Coins },
+    { id: "crypto", label: "Cripto (Paymento)", icon: Coins },
     { id: "eu_bank", label: "Banco (Europa)", icon: Landmark },
     { id: "test", label: "Prueba", icon: FlaskConical },
   ];
@@ -297,7 +298,7 @@ function TestPaymentPanel({
         </span>
         <p className="mt-3 font-semibold text-lime-300">Modo de prueba</p>
         <p className="mt-1 text-sm leading-relaxed text-white/60">
-          No se hace ningún cargo real ni se contacta a Stripe o MaxelPay.
+          No se hace ningún cargo real ni se contacta a Stripe o Paymento.
           Sirve para probar el flujo completo del checkout de punta a punta.
         </p>
       </div>
@@ -332,7 +333,6 @@ export default function CheckoutModal({
   deliveryLabel,
   promoCode,
   resumeOrderId,
-  resumeCancelled,
   resumeRecipient,
 }: Props) {
   const [step, setStep] = useState<Step>("recipient");
@@ -345,7 +345,7 @@ export default function CheckoutModal({
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [invoiceLoading, setInvoiceLoading] = useState(false);
   const [invoiceError, setInvoiceError] = useState<string | null>(null);
-  const [cryptoNotice, setCryptoNotice] = useState<"cancelled" | "failed" | null>(null);
+  const [cryptoFailed, setCryptoFailed] = useState(false);
 
   useEffect(() => {
     if (!open) {
@@ -359,27 +359,21 @@ export default function CheckoutModal({
       setInvoice(null);
       setInvoiceLoading(false);
       setInvoiceError(null);
-      setCryptoNotice(null);
+      setCryptoFailed(false);
       return;
     }
     if (resumeOrderId) {
       setMethod("crypto");
       setRecipient(resumeRecipient ?? emptyRecipient);
       setStep("confirming");
-    } else if (resumeCancelled) {
-      setMethod("crypto");
-      setRecipient(resumeRecipient ?? emptyRecipient);
-      setCryptoNotice("cancelled");
-      setStep("ready");
     }
-    // resumeOrderId/resumeCancelled/resumeRecipient solo importan en el
-    // instante en que `open` pasa a true — Calculator ya limpió la URL y el
-    // sessionStorage para entonces, así que no hace falta re-ejecutar esto
-    // en cada render.
+    // resumeOrderId/resumeRecipient solo importan en el instante en que
+    // `open` pasa a true — Calculator ya limpió la URL y el sessionStorage
+    // para entonces, así que no hace falta re-ejecutar esto en cada render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  // Mientras esperamos la confirmación de MaxelPay: consulta el estado del
+  // Mientras esperamos la confirmación de Paymento: consulta el estado del
   // pedido cada pocos segundos (no hay webhooks del navegador al cliente).
   useEffect(() => {
     if (step !== "confirming" || !resumeOrderId) return;
@@ -394,9 +388,9 @@ export default function CheckoutModal({
         if (data.status === "paid") {
           setSuccessInfo({ kind: "paid" });
           setStep("success");
-          generateInvoice(recipient, "Cripto (MaxelPay)", resumeOrderId);
+          generateInvoice(recipient, "Cripto (Paymento)", resumeOrderId);
         } else if (data.status === "failed") {
-          setCryptoNotice("failed");
+          setCryptoFailed(true);
           setMethod("crypto");
           setStep("ready");
         }
@@ -692,11 +686,9 @@ export default function CheckoutModal({
 
                   {method === "crypto" && (
                     <>
-                      {cryptoNotice && (
+                      {cryptoFailed && (
                         <div className="mt-4 rounded-xl border border-lime-400/20 bg-lime-400/5 px-4 py-3 text-sm text-white/70">
-                          {cryptoNotice === "cancelled"
-                            ? "Cancelaste el pago en MaxelPay. Puedes intentarlo de nuevo cuando quieras."
-                            : "MaxelPay no pudo confirmar el pago. Intenta de nuevo o elige otro método."}
+                          Paymento no pudo confirmar el pago. Intenta de nuevo o elige otro método.
                         </div>
                       )}
                       <CryptoPayment
@@ -755,7 +747,7 @@ export default function CheckoutModal({
                 >
                   <Loader2 size={28} className="animate-spin text-lime-300" />
                   <p className="font-display text-lg font-semibold text-white">
-                    Confirmando tu pago con MaxelPay…
+                    Confirmando tu pago con Paymento…
                   </p>
                   <p className="max-w-xs text-sm text-white/50">
                     Esto puede tardar un momento mientras se acredita la
@@ -802,7 +794,7 @@ export default function CheckoutModal({
                     {successInfo?.kind === "test" ? (
                       <>
                         Este fue un envío de prueba: no se procesó ningún
-                        cargo real ni se contactó a Stripe o MaxelPay. El
+                        cargo real ni se contactó a Stripe o Paymento. El
                         resto del flujo (destinatario, tasas, comisión)
                         funcionó igual que en un envío de verdad.
                       </>

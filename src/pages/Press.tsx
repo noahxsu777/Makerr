@@ -10,8 +10,8 @@ const announcements = [
   },
   {
     date: "Julio 2026",
-    title: "Ahora se puede pagar en cripto con MaxelPay",
-    desc: "Lukea suma una segunda forma de pago junto a Stripe: checkout en cripto hospedado por MaxelPay, con confirmación automática.",
+    title: "Ahora se puede pagar en cripto con Paymento",
+    desc: "Lukea suma una segunda forma de pago junto a Stripe: checkout en cripto hospedado por Paymento, con confirmación automática.",
   },
   {
     date: "Junio 2026",

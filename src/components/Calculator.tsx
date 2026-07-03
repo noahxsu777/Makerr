@@ -23,20 +23,22 @@ import { CRYPTO_ORDER_STORAGE_KEY, type CryptoOrderContext } from "./CryptoPayme
 import RelativeTime from "./RelativeTime";
 
 type ResumeState = {
-  orderId?: string;
-  cancelled: boolean;
+  orderId: string;
   context: CryptoOrderContext;
 };
 
-// Al volver del checkout hospedado de MaxelPay (ver CryptoPayment.tsx), la
+// Al volver del checkout hospedado de Paymento (ver CryptoPayment.tsx), la
 // navegación completa recarga la página y pierde todo el estado de React —
 // por eso el contexto del pedido se guardó en sessionStorage antes de salir,
-// y acá se recupera leyendo los query params que MaxelPay agrega al volver.
-function readMaxelPayResume(): ResumeState | null {
+// y acá se recupera leyendo el query param que Paymento agrega al volver.
+// Paymento solo da una `returnUrl` (no distingue éxito de cancelación en la
+// redirección — su propia doc dice que hay que confirmar con el webhook +
+// verify), así que siempre se resume hacia el paso "confirmando" y el
+// resultado real (pagado o no) lo decide el polling a /api/order-status.
+function readPaymentoResume(): ResumeState | null {
   const params = new URLSearchParams(window.location.search);
-  const status = params.get("maxelpay");
   const orderId = params.get("orderId");
-  if (!status || !orderId) return null;
+  if (params.get("paymento") !== "return" || !orderId) return null;
 
   const raw = window.sessionStorage.getItem(CRYPTO_ORDER_STORAGE_KEY);
   window.sessionStorage.removeItem(CRYPTO_ORDER_STORAGE_KEY);
@@ -46,11 +48,7 @@ function readMaxelPayResume(): ResumeState | null {
   try {
     const context: CryptoOrderContext = JSON.parse(raw);
     if (context.orderId !== orderId) return null;
-    return {
-      orderId: status === "success" ? orderId : undefined,
-      cancelled: status === "cancel",
-      context,
-    };
+    return { orderId, context };
   } catch {
     return null;
   }
@@ -75,7 +73,7 @@ export default function Calculator() {
   const [resume, setResume] = useState<ResumeState | null>(null);
 
   useEffect(() => {
-    const resumed = readMaxelPayResume();
+    const resumed = readPaymentoResume();
     if (resumed) {
       setResume(resumed);
       setCheckoutOpen(true);
@@ -441,7 +439,6 @@ export default function Calculator() {
         deliveryLabel={resume?.context.deliveryLabel ?? delivery.label}
         promoCode={resume?.context.promoCode ?? appliedPromo?.code}
         resumeOrderId={resume?.orderId}
-        resumeCancelled={resume?.cancelled}
         resumeRecipient={resume?.context.recipient}
       />
     </section>
