@@ -15,7 +15,7 @@ con Stripe (tarjeta o cuenta bancaria vía ACH).
 - Checkout funcional con Stripe: tarjeta de crédito/débito o cuenta bancaria (ACH)
 - Pago alternativo en USDC por la red Solana, con QR (Solana Pay) y verificación manual por captura de pantalla
 - Modo "Prueba" que simula un pago exitoso sin llamar a Stripe ni Solana, para probar el flujo completo sin credenciales
-- Factura simulada (número consecutivo + PDF descargable) al completar cualquier método de pago
+- Factura simulada (número consecutivo, detalle completo) que se genera y se muestra dentro de la app al completar cualquier método de pago — sin PDF, todo en línea
 - Formulario de destinatario con campos específicos por país (CCI en Perú, tipo de documento/cuenta en Colombia, CLABE en México)
 - Sección "Cómo funciona" con revelado por scroll
 - Grid de 8 formas de entrega (banco, wallets, efectivo, tarjeta, domicilio, recarga, servicios, cripto)
