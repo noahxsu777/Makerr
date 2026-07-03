@@ -67,7 +67,7 @@ const RATES_SOURCES = [
 ];
 
 const RATES_TTL_MS = 10 * 60 * 1000; // 10 minutos
-const FX_MARGIN = 0.02; // 2%
+const FX_MARGIN = 0.1; // 10%
 
 const SUPPORTED_CURRENCIES = [
   "MXN",

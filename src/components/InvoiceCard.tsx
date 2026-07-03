@@ -107,6 +107,9 @@ export default function InvoiceCard({
         </p>
         <Row label="Envías" value={`$${invoice.amount.toFixed(2)} ${invoice.currency}`} />
         <Row label="Costo de envío" value={`$${invoice.fee.toFixed(2)} ${invoice.currency}`} />
+        {invoice.promoCode && (
+          <Row label="Código promocional" value={invoice.promoCode} />
+        )}
         <div className="mt-1 border-t border-white/10 pt-2">
           <Row
             label="Total cobrado"

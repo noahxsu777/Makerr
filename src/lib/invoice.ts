@@ -11,6 +11,7 @@ export type Invoice = {
   recipientName: string;
   recipientReference: string;
   orderReference: string;
+  promoCode?: string;
 };
 
 // No hay un proveedor de facturación real conectado, así que esto se genera
@@ -51,6 +52,7 @@ export function createInvoice(input: {
   recipientName: string;
   recipientReference: string;
   orderReference: string;
+  promoCode?: string;
 }): Invoice {
   return {
     invoiceNumber: nextInvoiceNumber(),

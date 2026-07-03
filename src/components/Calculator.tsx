@@ -1,8 +1,20 @@
 import { useMemo, useState } from "react";
-import { motion } from "framer-motion";
-import { ChevronDown, Zap, ShieldCheck, Clock3, Receipt, Radio, WifiOff } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
+import {
+  BadgeCheck,
+  ChevronDown,
+  Zap,
+  ShieldCheck,
+  Clock3,
+  Receipt,
+  Radio,
+  Tag,
+  Ticket,
+  WifiOff,
+} from "lucide-react";
 import { countries, type Country } from "../lib/data";
 import { getTransferFee, MAX_SEND_USD, MIN_SEND_USD } from "../lib/fees";
+import { findPromoCode, getPromoDiscount, type PromoCode } from "../lib/promo";
 import { getFallbackRate } from "../lib/rates";
 import { useLiveRates } from "../lib/useLiveRates";
 import AnimatedNumber from "./AnimatedNumber";
@@ -39,9 +51,36 @@ export default function Calculator() {
 
   const received = useMemo(() => amount * rate, [amount, rate]);
 
-  const fee = getTransferFee(amount);
+  const [promoInput, setPromoInput] = useState("");
+  const [appliedPromo, setAppliedPromo] = useState<PromoCode | null>(null);
+  const [promoError, setPromoError] = useState<string | null>(null);
+  const [promoShakeKey, setPromoShakeKey] = useState(0);
+
+  const rawFee = getTransferFee(amount);
+  const discount = appliedPromo ? getPromoDiscount(rawFee, appliedPromo) : 0;
+  const fee = Math.round((rawFee - discount) * 100) / 100;
   const total = amount + fee;
   const canContinue = amount >= MIN_SEND_USD && amount <= MAX_SEND_USD;
+
+  const applyPromo = () => {
+    const trimmed = promoInput.trim();
+    if (!trimmed) return;
+    const found = findPromoCode(trimmed);
+    if (!found) {
+      setPromoError("Ese código no es válido o ya venció.");
+      setPromoShakeKey((k) => k + 1);
+      return;
+    }
+    setAppliedPromo(found);
+    setPromoError(null);
+    setPromoInput("");
+  };
+
+  const removePromo = () => {
+    setAppliedPromo(null);
+    setPromoError(null);
+    setPromoInput("");
+  };
 
   return (
     <section id="calculadora" className="relative py-24 sm:py-32">
@@ -174,12 +213,39 @@ export default function Calculator() {
                 <Receipt size={14} className="text-lime-300" />
                 Costo de envío
               </span>
-              <span className="font-medium text-white">${fee.toFixed(2)}</span>
+              <span
+                className={`font-medium ${discount > 0 ? "text-white/35 line-through" : "text-white"}`}
+              >
+                ${rawFee.toFixed(2)}
+              </span>
             </div>
+
+            <AnimatePresence>
+              {discount > 0 && appliedPromo && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={{ duration: 0.25, ease: "easeOut" }}
+                  className="overflow-hidden"
+                >
+                  <div className="mt-2 flex items-center justify-between text-sm text-lime-300">
+                    <span className="flex items-center gap-1.5">
+                      <Tag size={14} />
+                      Descuento ({appliedPromo.code})
+                    </span>
+                    <span className="font-semibold">
+                      -$<AnimatedNumber value={discount} decimals={2} />
+                    </span>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             <div className="mt-3 flex items-center justify-between border-t border-white/10 pt-3">
               <span className="text-sm font-semibold text-white/70">Total a pagar</span>
               <span className="font-display text-lg font-bold text-lime-300">
-                ${total.toFixed(2)}
+                $<AnimatedNumber value={total} decimals={2} />
               </span>
             </div>
             <p className="mt-3 text-[11px] leading-relaxed text-white/35">
@@ -188,6 +254,76 @@ export default function Calculator() {
                 ? "USD"
                 : "moneda local"}
             </p>
+          </div>
+
+          <div className="relative mt-4">
+            <AnimatePresence mode="wait">
+              {appliedPromo ? (
+                <motion.div
+                  key="applied"
+                  initial={{ opacity: 0, y: -8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  transition={{ duration: 0.25 }}
+                  className="flex items-center justify-between gap-3 rounded-xl border border-lime-400/30 bg-lime-400/10 px-4 py-3"
+                >
+                  <span className="flex items-center gap-2 text-sm font-semibold text-lime-300">
+                    <BadgeCheck size={16} className="shrink-0" />
+                    <span className="truncate">
+                      {appliedPromo.code} · {appliedPromo.label}
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={removePromo}
+                    className="shrink-0 text-xs font-medium text-white/50 transition-colors hover:text-white"
+                  >
+                    Quitar
+                  </button>
+                </motion.div>
+              ) : (
+                <motion.div
+                  key={`form-${promoShakeKey}`}
+                  initial={{ opacity: 0, y: -8 }}
+                  animate={
+                    promoError
+                      ? { opacity: 1, y: 0, x: [0, -8, 8, -6, 6, -3, 3, 0] }
+                      : { opacity: 1, y: 0 }
+                  }
+                  exit={{ opacity: 0, y: -8 }}
+                  transition={{ duration: 0.35 }}
+                  className="flex gap-2"
+                >
+                  <div className="relative flex-1">
+                    <Ticket
+                      size={15}
+                      className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30"
+                    />
+                    <input
+                      type="text"
+                      value={promoInput}
+                      onChange={(e) => {
+                        setPromoInput(e.target.value);
+                        setPromoError(null);
+                      }}
+                      onKeyDown={(e) => e.key === "Enter" && applyPromo()}
+                      placeholder="¿Tienes un código promocional?"
+                      className="w-full rounded-xl border border-white/10 bg-white/[0.03] py-3 pl-10 pr-4 text-sm text-white placeholder:text-white/25 outline-none transition-colors focus:border-lime-400/50"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={applyPromo}
+                    className="shrink-0 rounded-xl border border-white/15 px-5 py-3 text-sm font-semibold text-white/80 transition-colors hover:bg-white/5"
+                  >
+                    Aplicar
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
+            {promoError && (
+              <p className="mt-1.5 text-xs text-red-300">{promoError}</p>
+            )}
           </div>
 
           <p className="relative mt-6 text-xs font-semibold uppercase tracking-wide text-white/40">
@@ -247,6 +383,7 @@ export default function Calculator() {
         receivedAmount={received}
         country={country}
         deliveryLabel={delivery.label}
+        promoCode={appliedPromo?.code}
       />
     </section>
   );

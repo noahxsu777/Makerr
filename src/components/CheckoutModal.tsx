@@ -38,6 +38,7 @@ type Props = {
   receivedAmount: number;
   country: Country;
   deliveryLabel: string;
+  promoCode?: string;
 };
 
 type Step = "recipient" | "ready" | "success";
@@ -316,6 +317,7 @@ export default function CheckoutModal({
   receivedAmount,
   country,
   deliveryLabel,
+  promoCode,
 }: Props) {
   const [step, setStep] = useState<Step>("recipient");
   const [method, setMethod] = useState<PaymentMethod>("stripe");
@@ -367,6 +369,7 @@ export default function CheckoutModal({
           recipientName: recipientData.fullName,
           recipientReference: recipientData.reference,
           orderReference,
+          promoCode,
         });
         setInvoice(inv);
       } catch (e) {
@@ -500,6 +503,12 @@ export default function CheckoutModal({
                   <span className="text-white/50">Forma de entrega</span>
                   <span className="font-medium text-white/80">{deliveryLabel}</span>
                 </div>
+                {promoCode && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-white/50">Código promocional</span>
+                    <span className="font-medium text-lime-300">{promoCode}</span>
+                  </div>
+                )}
               </div>
             )}
 

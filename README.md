@@ -11,7 +11,8 @@ con Stripe (tarjeta o cuenta bancaria vía ACH).
 - Hero animado con blobs flotantes y una tarjeta de envío interactiva
 - Marquee infinito con 16 países de destino
 - Calculadora de envío en vivo con números animados y forma de entrega elegible
-- Tasas de cambio en tiempo real vía exchangerate.fun (con margen de Lukea del 2% aplicado) con respaldo automático si la API externa falla
+- Códigos promocionales (`LUKEA10`, `BIENVENIDO`, `AHORRA5`) con descuento animado sobre el costo de envío
+- Tasas de cambio en tiempo real vía exchangerate.fun (con margen de Lukea del 10% aplicado) con respaldo automático si la API externa falla
 - Checkout funcional con Stripe: tarjeta de crédito/débito o cuenta bancaria (ACH)
 - Pago alternativo en USDC por la red Solana, con QR (Solana Pay) y verificación manual por captura de pantalla
 - Modo "Prueba" que simula un pago exitoso sin llamar a Stripe ni Solana, para probar el flujo completo sin credenciales
@@ -29,7 +30,7 @@ con Stripe (tarjeta o cuenta bancaria vía ACH).
 El backend (`GET /api/rates`) consulta [exchangerate.fun](https://www.exchangerate.fun/docs/)
 (`api.exchangerate.fun/latest`, gratis, sin API key) como fuente principal, y
 si falla intenta con dos fuentes públicas más de respaldo. A todo el mundo le
-resta un margen de **2%** antes de devolverlo — esa diferencia es el margen
+resta un margen de **10%** antes de devolverlo — esa diferencia es el margen
 de Lukea, y el cliente nunca ve la tasa de mercado cruda. Las tasas se
 cachean 10 minutos en el servidor para no golpear las APIs en cada request;
 si las tres fuentes fallan pero ya había un valor cacheado, se sigue
@@ -40,7 +41,7 @@ Si `/api/rates` no está disponible — backend caído, `npm run dev` sin
 navegador ya no se rompe con un error de "no es JSON válido": en vez de eso,
 `src/lib/rates.ts` intenta pedir la tasa **directo desde el navegador** a
 exchangerate.fun y, si esa también falla, a open.er-api.com, aplicando el
-mismo margen del 2% del lado del cliente. Solo si las dos rutas fallan cae a
+mismo margen del 10% del lado del cliente. Solo si las dos rutas fallan cae a
 las tasas de respaldo fijas y lo indica con "Tasa de respaldo" (con el motivo
 exacto debajo).
 
