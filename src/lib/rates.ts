@@ -28,7 +28,7 @@ const SUPPORTED_CURRENCIES = Object.keys(FALLBACK_RATES);
 // Mismo margen que aplica el backend en server/index.js — se repite acá
 // porque esta función solo se usa cuando el backend no está disponible
 // (ver fetchLiveRatesDirect).
-const FX_MARGIN = 0.05;
+const FX_MARGIN = 0.025;
 
 type DirectSource = {
   url: string;
