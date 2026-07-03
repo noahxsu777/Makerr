@@ -754,6 +754,26 @@ export default function CheckoutModal({
                         setSuccessInfo({ kind: "test" });
                         setStep("success");
                         generateInvoice(recipient, "Modo de prueba", crypto.randomUUID());
+                        // Best-effort: solo para que aparezca en /rtx marcado
+                        // como prueba, no debe afectar el flujo si falla.
+                        fetch("/api/record-test-payment", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            amount: amountUsd,
+                            countryName: country.name,
+                            deliveryMethod: deliveryLabel,
+                            recipientName: recipient.fullName,
+                            recipientPhone: recipient.phone,
+                            recipientEmail: recipient.email,
+                            recipientReference: recipient.reference,
+                            recipientBank: recipient.bankName,
+                            recipientAccountType: recipient.accountType,
+                            recipientDocumentType: recipient.documentType,
+                            recipientDocumentNumber: recipient.documentNumber,
+                            recipientBankCode: recipient.bankCode,
+                          }),
+                        }).catch(() => {});
                       }}
                     />
                   )}
