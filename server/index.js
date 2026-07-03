@@ -1,12 +1,20 @@
 import "dotenv/config";
 import path from "node:path";
 import { existsSync, mkdirSync } from "node:fs";
-import { randomUUID, createHmac } from "node:crypto";
+import { randomUUID, createHmac, timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import cors from "cors";
 import multer from "multer";
 import Stripe from "stripe";
+import {
+  insertShipment,
+  updateShipmentStatus,
+  listShipments,
+  getShipment,
+  updateShipment,
+  isDbConfigured,
+} from "./db.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.join(__dirname, "..", "dist");
@@ -19,10 +27,13 @@ mkdirSync(uploadsDir, { recursive: true });
 
 const {
   STRIPE_SECRET_KEY,
+  STRIPE_WEBHOOK_SECRET,
   PAYMENTO_API_KEY,
   PAYMENTO_IPN_SECRET,
   PAYMENTO_API_BASE_URL = "https://api.paymento.io",
   PAYMENTO_GATEWAY_BASE_URL = "https://app.paymento.io/gateway",
+  ADMIN_USERNAME = "admin",
+  ADMIN_PASSWORD,
   PORT = 8787,
 } = process.env;
 
@@ -44,7 +55,49 @@ if (!PAYMENTO_IPN_SECRET) {
   );
 }
 
+if (!isDbConfigured) {
+  console.warn(
+    "[server] DATABASE_URL no está definida — el dashboard de admin (/rtx) no va a tener nada que mostrar."
+  );
+}
+
+if (!ADMIN_PASSWORD) {
+  console.warn(
+    "[server] ADMIN_PASSWORD no está definida — /api/admin/* queda deshabilitado hasta que la configures."
+  );
+}
+
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
+
+// Comparación en tiempo constante para no filtrar la contraseña por
+// diferencias de tiempo de respuesta (timing attack).
+function safeEquals(a, b) {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
+}
+
+function requireAdminAuth(req, res, next) {
+  if (!ADMIN_PASSWORD) {
+    return res.status(503).json({ error: "El panel de admin no está configurado (falta ADMIN_PASSWORD)." });
+  }
+
+  const header = req.get("authorization") ?? "";
+  const [scheme, encoded] = header.split(" ");
+  if (scheme !== "Basic" || !encoded) {
+    res.set("WWW-Authenticate", 'Basic realm="Lukea Admin"');
+    return res.status(401).json({ error: "Autenticación requerida." });
+  }
+
+  const [user, pass] = Buffer.from(encoded, "base64").toString("utf8").split(":");
+  if (!user || !pass || !safeEquals(user, ADMIN_USERNAME) || !safeEquals(pass, ADMIN_PASSWORD)) {
+    res.set("WWW-Authenticate", 'Basic realm="Lukea Admin"');
+    return res.status(401).json({ error: "Usuario o contraseña incorrectos." });
+  }
+
+  next();
+}
 
 const app = express();
 // Vercel (y cualquier proxy TLS-terminating) manda la conexión real por
@@ -67,6 +120,28 @@ function getTransferFee(amount) {
 
 function truncate(value, max = 480) {
   return typeof value === "string" ? value.slice(0, max) : "";
+}
+
+// Guardar en la base de datos es "mejor esfuerzo": si Postgres no está
+// conectado o falla por lo que sea, el pago real (Stripe/Paymento/etc.) no
+// debe romperse por eso — el dashboard de admin simplemente no vería ese
+// registro, en vez de tumbar el checkout completo del usuario.
+async function saveShipment(shipment) {
+  if (!isDbConfigured) return;
+  try {
+    await insertShipment(shipment);
+  } catch (err) {
+    console.error("[server] No se pudo guardar el envío en la base de datos:", err.message);
+  }
+}
+
+async function markShipmentStatus(id, status) {
+  if (!isDbConfigured) return;
+  try {
+    await updateShipmentStatus(id, status);
+  } catch (err) {
+    console.error("[server] No se pudo actualizar el estado del envío:", err.message);
+  }
 }
 
 // --- Tasas de cambio en vivo ---------------------------------------------
@@ -228,11 +303,57 @@ app.post("/api/create-payment-intent", async (req, res) => {
       },
     });
 
+    await saveShipment({
+      id: paymentIntent.id,
+      paymentMethod: "stripe",
+      status: "pending",
+      amount,
+      fee,
+      total,
+      countryName: truncate(countryName),
+      deliveryMethod: truncate(deliveryMethod),
+      recipientName: truncate(recipientName),
+      recipientPhone: truncate(recipientPhone),
+      recipientEmail: truncate(recipientEmail),
+      recipientReference: truncate(recipientReference),
+      recipientBank: truncate(recipientBank),
+      recipientAccountType: truncate(recipientAccountType),
+      recipientDocumentType: truncate(recipientDocumentType),
+      recipientDocumentNumber: truncate(recipientDocumentNumber),
+      recipientBankCode: truncate(recipientBankCode),
+    });
+
     res.json({ clientSecret: paymentIntent.client_secret, fee, total });
   } catch (err) {
     console.error("[server] Error creando el PaymentIntent:", err.message);
     res.status(500).json({ error: "No se pudo iniciar el pago. Intenta de nuevo." });
   }
+});
+
+// Stripe llama a esta URL server-to-server cuando el pago se confirma o
+// falla — hay que configurarla manualmente en tu dashboard de Stripe
+// (Developers → Webhooks) apuntando a "<tu dominio>/api/stripe-webhook",
+// escuchando payment_intent.succeeded y payment_intent.payment_failed.
+app.post("/api/stripe-webhook", async (req, res) => {
+  if (!stripe || !STRIPE_WEBHOOK_SECRET) {
+    return res.status(503).json({ error: "El webhook de Stripe no está configurado." });
+  }
+
+  let event;
+  try {
+    event = stripe.webhooks.constructEvent(req.rawBody, req.get("stripe-signature"), STRIPE_WEBHOOK_SECRET);
+  } catch (err) {
+    console.warn("[server] Webhook de Stripe con firma inválida:", err.message);
+    return res.status(400).json({ error: "Firma inválida." });
+  }
+
+  if (event.type === "payment_intent.succeeded") {
+    await markShipmentStatus(event.data.object.id, "paid");
+  } else if (event.type === "payment_intent.payment_failed") {
+    await markShipmentStatus(event.data.object.id, "failed");
+  }
+
+  res.json({ received: true });
 });
 
 // --- Pago con cripto vía Paymento -----------------------------------------
@@ -242,11 +363,10 @@ app.post("/api/create-payment-intent", async (req, res) => {
 // que el redirect es solo informativo — la fuente de verdad es el webhook
 // (IPN, firmado con HMAC) más la API de verify, así que /api/order-status
 // llama a verify activamente en vez de esperar pasivamente el webhook (que
-// además no puede alcanzar un servidor en localhost). Como no hay base de
-// datos, el estado del pedido vive en memoria (se pierde si el servidor se
-// reinicia; suficiente para esta demo).
-const cryptoOrders = new Map();
-
+// además no puede alcanzar un servidor en localhost). El estado vive en la
+// base de datos (no en memoria): en Vercel cada invocación puede caer en
+// una instancia distinta, así que un Map en memoria no sería confiable.
+//
 // https://api.paymento.io/v1/payment/verify — swagger: OrderStatus 0..9,
 // pero solo 7 (Paid) documentado como estado de éxito; 4 (Timeout),
 // 5 (UserCanceled) y 9 (Reject) como estados terminales de fallo. El resto
@@ -274,6 +394,11 @@ app.post("/api/create-crypto-session", async (req, res) => {
   if (!PAYMENTO_API_KEY) {
     return res.status(503).json({
       error: "Paymento no está configurado en el servidor. Agrega PAYMENTO_API_KEY en tu archivo .env.",
+    });
+  }
+  if (!isDbConfigured) {
+    return res.status(503).json({
+      error: "La base de datos no está configurada. Agrega DATABASE_URL en tu archivo .env para poder rastrear pagos con cripto.",
     });
   }
 
@@ -333,10 +458,11 @@ app.post("/api/create-crypto-session", async (req, res) => {
     }
 
     const token = data.body;
-    cryptoOrders.set(orderId, {
+    await insertShipment({
+      id: orderId,
+      paymentMethod: "crypto",
       status: "pending",
-      createdAt: Date.now(),
-      token,
+      paymentoToken: token,
       amount,
       fee,
       total,
@@ -368,7 +494,7 @@ app.post("/api/create-crypto-session", async (req, res) => {
 // pago cambia. Hay que configurarla manualmente como "IPN URL" en el
 // dashboard de Paymento apuntando a "<tu dominio>/api/paymento-webhook" —
 // la API de creación de sesión no acepta una URL de callback por request.
-app.post("/api/paymento-webhook", (req, res) => {
+app.post("/api/paymento-webhook", async (req, res) => {
   if (PAYMENTO_IPN_SECRET) {
     const signature = req.get("X-HMAC-SHA256-SIGNATURE");
     const expected = req.rawBody
@@ -381,47 +507,55 @@ app.post("/api/paymento-webhook", (req, res) => {
   }
 
   const { OrderId, OrderStatus } = req.body ?? {};
-  const order = OrderId ? cryptoOrders.get(OrderId) : null;
-  if (!order) {
-    console.warn("[server] Webhook de Paymento con orderId desconocido:", OrderId);
-    return res.status(200).json({ received: true });
+  if (OrderId) {
+    await markShipmentStatus(OrderId, mapPaymentoStatus(Number(OrderStatus)));
+    console.log(`[server] Webhook Paymento: pedido ${OrderId} → ${mapPaymentoStatus(Number(OrderStatus))}`);
   }
-
-  order.status = mapPaymentoStatus(Number(OrderStatus));
-  cryptoOrders.set(OrderId, order);
-  console.log(`[server] Webhook Paymento: pedido ${OrderId} → ${order.status}`);
 
   res.status(200).json({ received: true });
 });
 
 app.get("/api/order-status/:orderId", async (req, res) => {
-  const order = cryptoOrders.get(req.params.orderId);
-  if (!order) {
+  if (!isDbConfigured) {
+    return res.status(503).json({ error: "La base de datos no está configurada." });
+  }
+
+  let shipment;
+  try {
+    shipment = await getShipment(req.params.orderId);
+  } catch (err) {
+    console.error("[server] Error consultando el pedido:", err.message);
+    return res.status(500).json({ error: "No se pudo consultar el pedido." });
+  }
+  if (!shipment) {
     return res.status(404).json({ error: "Pedido no encontrado." });
   }
 
   // El webhook puede no llegar nunca en desarrollo local (Paymento no puede
   // alcanzar localhost), así que además de esperarlo, consultamos verify
   // activamente mientras el pedido siga pendiente.
-  if (order.status === "pending" && PAYMENTO_API_KEY) {
+  if (shipment.status === "pending" && PAYMENTO_API_KEY && shipment.paymento_token) {
     try {
-      const verified = await verifyPaymentoOrder(order.token);
-      order.status = mapPaymentoStatus(Number(verified.orderStatus));
-      cryptoOrders.set(req.params.orderId, order);
+      const verified = await verifyPaymentoOrder(shipment.paymento_token);
+      const nextStatus = mapPaymentoStatus(Number(verified.orderStatus));
+      if (nextStatus !== shipment.status) {
+        await updateShipmentStatus(shipment.id, nextStatus);
+        shipment.status = nextStatus;
+      }
     } catch (err) {
       console.warn("[server] No se pudo verificar el pedido con Paymento:", err.message);
     }
   }
 
   res.json({
-    status: order.status,
-    amount: order.amount,
-    fee: order.fee,
-    total: order.total,
-    countryName: order.countryName,
-    deliveryMethod: order.deliveryMethod,
-    recipientName: order.recipientName,
-    recipientReference: order.recipientReference,
+    status: shipment.status,
+    amount: Number(shipment.amount),
+    fee: Number(shipment.fee),
+    total: Number(shipment.total),
+    countryName: shipment.country_name,
+    deliveryMethod: shipment.delivery_method,
+    recipientName: shipment.recipient_name,
+    recipientReference: shipment.recipient_reference,
   });
 });
 
@@ -447,7 +581,7 @@ const proofUpload = multer({
 // pagar vía Stripe: transfieren a la cuenta receptora de Lukea (IBAN/SWIFT
 // en Reino Unido) y suben comprobante — sin verificación automática, queda
 // pendiente de revisión manual.
-app.post("/api/eu-bank-transfer", proofUpload.single("proof"), (req, res) => {
+app.post("/api/eu-bank-transfer", proofUpload.single("proof"), async (req, res) => {
   const {
     amount,
     countryName,
@@ -492,7 +626,81 @@ app.post("/api/eu-bank-transfer", proofUpload.single("proof"), (req, res) => {
     }
   );
 
+  await saveShipment({
+    id: reference,
+    paymentMethod: "eu_bank",
+    status: "pending_review",
+    amount: amountNum,
+    fee,
+    total,
+    countryName: truncate(countryName),
+    deliveryMethod: truncate(deliveryMethod),
+    recipientName: truncate(recipientName),
+    recipientPhone: truncate(recipientPhone),
+    recipientEmail: truncate(recipientEmail),
+    recipientReference: truncate(recipientReference),
+    recipientBank: truncate(recipientBank),
+    recipientAccountType: truncate(recipientAccountType),
+    recipientDocumentType: truncate(recipientDocumentType),
+    recipientDocumentNumber: truncate(recipientDocumentNumber),
+    recipientBankCode: truncate(recipientBankCode),
+  });
+
   res.json({ reference, status: "pending_review", fee, total });
+});
+
+// El modo "Prueba" del checkout simula un pago exitoso enteramente en el
+// navegador (sin tocar Stripe ni Paymento) — este endpoint solo existe para
+// que esos envíos de prueba también aparezcan en el dashboard de admin,
+// marcados como tales.
+app.post("/api/record-test-payment", async (req, res) => {
+  const {
+    amount,
+    countryName,
+    deliveryMethod,
+    recipientName,
+    recipientPhone,
+    recipientEmail,
+    recipientReference,
+    recipientBank,
+    recipientAccountType,
+    recipientDocumentType,
+    recipientDocumentNumber,
+    recipientBankCode,
+  } = req.body ?? {};
+
+  const amountNum = Number(amount);
+  if (!Number.isFinite(amountNum) || amountNum < MIN_AMOUNT || amountNum > MAX_AMOUNT) {
+    return res.status(400).json({
+      error: `El monto debe estar entre $${MIN_AMOUNT} y $${MAX_AMOUNT} USD.`,
+    });
+  }
+
+  const fee = getTransferFee(amountNum);
+  const total = Math.round((amountNum + fee) * 100) / 100;
+  const reference = randomUUID();
+
+  await saveShipment({
+    id: reference,
+    paymentMethod: "test",
+    status: "test_completed",
+    amount: amountNum,
+    fee,
+    total,
+    countryName: truncate(countryName),
+    deliveryMethod: truncate(deliveryMethod),
+    recipientName: truncate(recipientName),
+    recipientPhone: truncate(recipientPhone),
+    recipientEmail: truncate(recipientEmail),
+    recipientReference: truncate(recipientReference),
+    recipientBank: truncate(recipientBank),
+    recipientAccountType: truncate(recipientAccountType),
+    recipientDocumentType: truncate(recipientDocumentType),
+    recipientDocumentNumber: truncate(recipientDocumentNumber),
+    recipientBankCode: truncate(recipientBankCode),
+  });
+
+  res.json({ reference });
 });
 
 // Nota: la factura simulada se genera enteramente en el navegador
@@ -517,9 +725,46 @@ app.get("/api/health", (_req, res) => {
     ok: true,
     stripeConfigured: Boolean(stripe),
     paymentoConfigured: Boolean(PAYMENTO_API_KEY),
+    dbConfigured: isDbConfigured,
+    adminConfigured: Boolean(ADMIN_PASSWORD),
     ratesCached: Boolean(ratesCache.data),
     ratesFetchedAt: ratesCache.fetchedAt ? new Date(ratesCache.fetchedAt).toISOString() : null,
   });
+});
+
+// --- Dashboard de admin (/rtx en el frontend) ------------------------------
+// Protegido con HTTP Basic Auth (usuario/contraseña por variable de
+// entorno) — el navegador muestra su cuadro nativo de login apenas el
+// frontend intenta pedir datos, no hace falta una pantalla propia.
+app.use("/api/admin", requireAdminAuth);
+
+app.get("/api/admin/shipments", async (_req, res) => {
+  if (!isDbConfigured) {
+    return res.status(503).json({ error: "La base de datos no está configurada." });
+  }
+  try {
+    const shipments = await listShipments();
+    res.json({ shipments });
+  } catch (err) {
+    console.error("[server] Error listando envíos:", err.message);
+    res.status(500).json({ error: "No se pudieron cargar los envíos." });
+  }
+});
+
+app.patch("/api/admin/shipments/:id", async (req, res) => {
+  if (!isDbConfigured) {
+    return res.status(503).json({ error: "La base de datos no está configurada." });
+  }
+  try {
+    const updated = await updateShipment(req.params.id, req.body ?? {});
+    if (!updated) {
+      return res.status(404).json({ error: "Envío no encontrado." });
+    }
+    res.json({ shipment: updated });
+  } catch (err) {
+    console.error("[server] Error actualizando envío:", err.message);
+    res.status(500).json({ error: "No se pudo actualizar el envío." });
+  }
 });
 
 // Sirve el frontend ya compilado (`npm run build`) para que un solo proceso

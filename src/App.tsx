@@ -9,6 +9,7 @@ const Blog = lazy(() => import("./pages/Blog"));
 const BlogPost = lazy(() => import("./pages/BlogPost"));
 const Press = lazy(() => import("./pages/Press"));
 const Careers = lazy(() => import("./pages/Careers"));
+const Admin = lazy(() => import("./pages/Admin"));
 
 function ScrollToTop() {
   const { pathname, hash } = useLocation();
@@ -21,10 +22,14 @@ function ScrollToTop() {
 }
 
 function App() {
+  // El dashboard de admin no es parte del sitio de marketing — sin navbar
+  // ni footer, para que no se sienta como una página más de la app.
+  const isAdminRoute = useLocation().pathname === "/rtx";
+
   return (
     <>
       <ScrollToTop />
-      <Navbar />
+      {!isAdminRoute && <Navbar />}
       <Suspense fallback={<div className="min-h-screen" />}>
         <Routes>
           <Route path="/" element={<Home />} />
@@ -33,9 +38,10 @@ function App() {
           <Route path="/blog/:slug" element={<BlogPost />} />
           <Route path="/prensa" element={<Press />} />
           <Route path="/carreras" element={<Careers />} />
+          <Route path="/rtx" element={<Admin />} />
         </Routes>
       </Suspense>
-      <Footer />
+      {!isAdminRoute && <Footer />}
     </>
   );
 }

@@ -17,6 +17,7 @@ con Stripe (tarjeta o cuenta bancaria vía ACH).
 - Pago alternativo en cripto vía Paymento (checkout hospedado + confirmación por webhook firmado con HMAC y verificación activa)
 - Transferencia bancaria manual para remitentes en Europa (IBAN/SWIFT), con comprobante y revisión manual
 - Modo "Prueba" que simula un pago exitoso sin llamar a Stripe ni Paymento, para probar el flujo completo sin credenciales
+- Dashboard de admin en `/rtx` (protegido con usuario/contraseña) con todas las solicitudes de envío y edición de sus datos
 - Factura simulada (número consecutivo, detalle completo) que se genera y se muestra dentro de la app al completar cualquier método de pago — sin PDF, todo en línea
 - Formulario de destinatario con campos específicos por país (CCI en Perú, tipo de documento/cuenta en Colombia, CLABE en México)
 - Sección "Cómo funciona" con revelado por scroll
@@ -93,9 +94,10 @@ Además, Paymento puede notificar antes por webhook (IPN) a
 como esa URL no puede alcanzar `localhost`, el polling contra verify es lo
 que garantiza que esto funcione también en desarrollo.
 
-Como no hay base de datos, el estado de cada pedido vive en memoria en el
-proceso de Express (`server/index.js`) y se pierde si el servidor se
-reinicia — suficiente para esta demo, pero no para producción real.
+El estado de cada pedido de cripto vive en la base de datos (ver
+"Base de datos y dashboard de admin" más abajo) — hace falta `DATABASE_URL`
+configurada para que este método funcione, ya que en Vercel un `Map` en
+memoria no sería confiable entre invocaciones.
 
 1. Copia el archivo de ejemplo si no lo has hecho: `cp .env.example .env`
 2. Agrega tu clave de API de Paymento en `PAYMENTO_API_KEY` (nunca la
@@ -118,6 +120,41 @@ receptora de Lukea y subir un comprobante. A diferencia de Paymento, esto
 no tiene confirmación automática — queda "pendiente de revisión" manual, y
 el comprobante se guarda en `server/uploads/` (no se sube a git). La cuenta
 receptora está fija en `src/lib/euBankTransfer.ts`.
+
+## Base de datos y dashboard de admin (/rtx)
+
+Cada solicitud de envío (Stripe, cripto, transferencia europea o modo
+prueba) se guarda en una tabla `shipments` de Postgres, y se puede ver y
+editar desde `/rtx` — un dashboard protegido con autenticación HTTP básica
+(usuario/contraseña por variable de entorno; el navegador muestra su
+cuadro nativo de login, no hay pantalla propia). Nunca se sube a git ni se
+expone al frontend público.
+
+1. En tu proyecto de Vercel, ve a **Storage → Connect Database** y crea/conecta
+   una base de datos Postgres (Neon). Vercel inyecta `DATABASE_URL`
+   automáticamente — no hace falta copiarla a mano en producción.
+2. Para desarrollo local, copia esa misma cadena de conexión a tu `.env`
+   como `DATABASE_URL`.
+3. Define `ADMIN_USERNAME` y `ADMIN_PASSWORD` en tu `.env` (y en las
+   variables de entorno de tu hosting) — son las credenciales que vas a
+   usar para entrar a `/rtx`. Usa una contraseña fuerte; sin
+   `ADMIN_PASSWORD`, `/api/admin/*` queda deshabilitado por completo.
+4. La tabla se crea sola (`CREATE TABLE IF NOT EXISTS`) la primera vez que
+   algún endpoint necesita escribir o leer — no hace falta correr una
+   migración a mano.
+
+Guardar en la base de datos es "mejor esfuerzo": si `DATABASE_URL` no está
+configurada o Postgres falla momentáneamente, el pago real (Stripe,
+Paymento, etc.) sigue funcionando igual — simplemente ese envío no
+aparecería en `/rtx`. La única excepción es el pago en cripto, que sí
+necesita la base de datos para rastrear el estado del pedido (ver arriba).
+
+Para que los pagos con Stripe también actualicen su estado en el
+dashboard (de "pending" a "paid"/"failed"), configura un webhook en tu
+[dashboard de Stripe](https://dashboard.stripe.com/test/webhooks) apuntando
+a `https://<tu-dominio>/api/stripe-webhook`, escuchando
+`payment_intent.succeeded` y `payment_intent.payment_failed`, y copia el
+"Signing secret" a `STRIPE_WEBHOOK_SECRET`.
 
 ## Desarrollo
 
