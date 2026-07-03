@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Loader2, ArrowLeft, ExternalLink, ServerCrash } from "lucide-react";
 import type { Recipient } from "./RecipientForm";
@@ -32,6 +32,9 @@ type Props = {
   recipient: Recipient;
   promoCode?: string;
   onBack: () => void;
+  // Se dispara cuando el iframe de Paymento vuelve a nuestro propio dominio
+  // (la vuelta trae ?paymento=return&orderId=...) sin haber salido de la página.
+  onReturn: (orderId: string) => void;
 };
 
 export default function CryptoPayment({
@@ -45,9 +48,12 @@ export default function CryptoPayment({
   recipient,
   promoCode,
   onBack,
+  onReturn,
 }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const handleClick = async () => {
     setSubmitting(true);
@@ -74,8 +80,17 @@ export default function CryptoPayment({
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "No se pudo iniciar el pago con Paymento.");
+      if (!res.ok) {
+        throw new Error(
+          data.error && data.detail
+            ? `${data.error} (${data.detail})`
+            : data.error || "No se pudo iniciar el pago con Paymento."
+        );
+      }
 
+      // Se guarda por si el iframe no carga (X-Frame-Options de Paymento) y
+      // el usuario usa el link de "ábrelo en una pestaña nueva" de abajo,
+      // que sí navega fuera de la página — ver Calculator.tsx para el resume.
       const context: CryptoOrderContext = {
         orderId: data.orderId,
         amountUsd,
@@ -90,16 +105,71 @@ export default function CryptoPayment({
         promoCode,
       };
       window.sessionStorage.setItem(CRYPTO_ORDER_STORAGE_KEY, JSON.stringify(context));
-      window.location.href = data.paymentUrl;
+      setCheckoutUrl(data.paymentUrl);
     } catch (err) {
       setError(
         err instanceof TypeError
           ? "No se pudo conectar con el servidor. ¿Está corriendo `npm run server` o `npm run dev:all`?"
           : (err as Error).message
       );
+    } finally {
       setSubmitting(false);
     }
   };
+
+  const handleIframeLoad = () => {
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+    try {
+      // Mientras el iframe siga en el dominio de Paymento esto tira una
+      // excepción cross-origin (comportamiento normal y esperado). Solo se
+      // puede leer la URL una vez que Paymento navega de vuelta a nuestra
+      // propia returnUrl, momento en el que ya es same-origin.
+      const href = iframe.contentWindow?.location.href;
+      if (!href) return;
+      const url = new URL(href);
+      const orderId = url.searchParams.get("orderId");
+      if (url.searchParams.get("paymento") === "return" && orderId) {
+        setCheckoutUrl(null);
+        onReturn(orderId);
+      }
+    } catch {
+      // Sigue en app.paymento.io — nada que hacer todavía.
+    }
+  };
+
+  if (checkoutUrl) {
+    return (
+      <div className="mt-4">
+        <button
+          type="button"
+          onClick={() => setCheckoutUrl(null)}
+          className="mb-4 flex items-center gap-1.5 text-xs font-medium text-white/45 transition-colors hover:text-white"
+        >
+          <ArrowLeft size={13} />
+          Volver
+        </button>
+        <div className="overflow-hidden rounded-2xl border border-white/10">
+          <iframe
+            ref={iframeRef}
+            src={checkoutUrl}
+            onLoad={handleIframeLoad}
+            title="Pago con Paymento"
+            className="h-[560px] w-full bg-white"
+          />
+        </div>
+        <a
+          href={checkoutUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-3 flex items-center justify-center gap-1.5 text-xs text-white/40 underline transition-colors hover:text-white/70"
+        >
+          ¿No carga? Ábrelo en una pestaña nueva
+          <ExternalLink size={12} />
+        </a>
+      </div>
+    );
+  }
 
   return (
     <div className="mt-4">
@@ -120,8 +190,8 @@ export default function CryptoPayment({
           ${totalUsd.toFixed(2)}
         </p>
         <p className="mt-3 text-xs leading-relaxed text-white/40">
-          Te llevamos a la página segura de Paymento para elegir tu moneda y
-          completar el pago. Al confirmar, vuelves aquí automáticamente.
+          Se abre el checkout de Paymento aquí mismo para elegir tu moneda y
+          completar el pago. Al confirmar, se cierra solo.
         </p>
       </div>
 
@@ -144,10 +214,7 @@ export default function CryptoPayment({
             Abriendo Paymento…
           </>
         ) : (
-          <>
-            Pagar con cripto
-            <ExternalLink size={16} />
-          </>
+          "Pagar con cripto"
         )}
       </button>
 
