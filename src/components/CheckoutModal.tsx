@@ -22,7 +22,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { isStripeConfigured, stripePromise } from "../lib/stripe";
-import type { Invoice } from "../lib/invoice";
+import { createInvoice, type Invoice } from "../lib/invoice";
 import RecipientForm, { type Recipient } from "./RecipientForm";
 import CryptoPayment from "./CryptoPayment";
 import InvoiceCard from "./InvoiceCard";
@@ -351,28 +351,30 @@ export default function CheckoutModal({
     setInvoiceLoading(true);
     setInvoiceError(null);
 
-    fetch("/api/invoices", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        amount: amountUsd,
-        fee: feeUsd,
-        total: totalUsd,
-        countryName: country.name,
-        deliveryMethod: deliveryLabel,
-        paymentMethod: paymentMethodLabel,
-        recipientName: recipientData.fullName,
-        recipientReference: recipientData.reference,
-        orderReference,
-      }),
-    })
-      .then(async (res) => {
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "No se pudo generar la factura.");
-        setInvoice(data);
-      })
-      .catch((e: Error) => setInvoiceError(e.message))
-      .finally(() => setInvoiceLoading(false));
+    // Se genera enteramente en el navegador (no hay proveedor de
+    // facturación real conectado), así que no depende de que el backend
+    // esté corriendo. El pequeño delay es solo para que se sienta como un
+    // paso real de "generando factura…".
+    setTimeout(() => {
+      try {
+        const inv = createInvoice({
+          amount: amountUsd,
+          fee: feeUsd,
+          total: totalUsd,
+          countryName: country.name,
+          deliveryMethod: deliveryLabel,
+          paymentMethod: paymentMethodLabel,
+          recipientName: recipientData.fullName,
+          recipientReference: recipientData.reference,
+          orderReference,
+        });
+        setInvoice(inv);
+      } catch (e) {
+        setInvoiceError((e as Error).message || "No se pudo generar la factura.");
+      } finally {
+        setInvoiceLoading(false);
+      }
+    }, 600);
   };
 
   const loadStripeIntent = (recipientData: Recipient) => {

@@ -269,56 +269,9 @@ app.post("/api/crypto-payment", cryptoUpload.single("proof"), (req, res) => {
   res.json({ reference, status: "pending_review", fee, total });
 });
 
-// --- Facturas (simuladas) -------------------------------------------------
-// No hay un proveedor de facturación real conectado. Esto simula el proceso
-// de "crear la factura": asigna un número consecutivo y devuelve los datos
-// ya formateados para que el frontend arme el PDF. El contador vive en
-// memoria (se reinicia si el servidor se reinicia), suficiente para una
-// simulación.
-let invoiceCounter = 1000;
-
-app.post("/api/invoices", (req, res) => {
-  const {
-    amount,
-    fee,
-    total,
-    countryName,
-    deliveryMethod,
-    paymentMethod,
-    recipientName,
-    recipientReference,
-    orderReference,
-  } = req.body ?? {};
-
-  const amountNum = Number(amount);
-  const feeNum = Number(fee);
-  const totalNum = Number(total);
-
-  if (![amountNum, feeNum, totalNum].every(Number.isFinite)) {
-    return res.status(400).json({ error: "Faltan montos válidos para generar la factura." });
-  }
-
-  invoiceCounter += 1;
-  const invoiceNumber = `LUK-${new Date().getFullYear()}-${String(invoiceCounter).padStart(5, "0")}`;
-
-  const invoice = {
-    invoiceNumber,
-    issuedAt: new Date().toISOString(),
-    amount: amountNum,
-    fee: feeNum,
-    total: totalNum,
-    currency: "USD",
-    countryName: truncate(countryName),
-    deliveryMethod: truncate(deliveryMethod),
-    paymentMethod: truncate(paymentMethod),
-    recipientName: truncate(recipientName),
-    recipientReference: truncate(recipientReference),
-    orderReference: truncate(orderReference) || randomUUID(),
-  };
-
-  console.log(`[server] Factura generada ${invoiceNumber} por $${totalNum.toFixed(2)}`);
-  res.json(invoice);
-});
+// Nota: la factura simulada se genera enteramente en el navegador
+// (src/lib/invoice.ts) para que no dependa de que este backend esté
+// corriendo — no hay endpoint de facturas aquí a propósito.
 
 app.get("/api/rates", async (_req, res) => {
   try {
