@@ -1,7 +1,7 @@
 import "dotenv/config";
 import path from "node:path";
 import { existsSync, mkdirSync } from "node:fs";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHmac } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import cors from "cors";
@@ -13,7 +13,14 @@ const distDir = path.join(__dirname, "..", "dist");
 const uploadsDir = path.join(__dirname, "uploads");
 mkdirSync(uploadsDir, { recursive: true });
 
-const { STRIPE_SECRET_KEY, PORT = 8787 } = process.env;
+const {
+  STRIPE_SECRET_KEY,
+  PAYMENTO_API_KEY,
+  PAYMENTO_IPN_SECRET,
+  PAYMENTO_API_BASE_URL = "https://api.paymento.io",
+  PAYMENTO_GATEWAY_BASE_URL = "https://app.paymento.io/gateway",
+  PORT = 8787,
+} = process.env;
 
 if (!STRIPE_SECRET_KEY) {
   console.warn(
@@ -21,11 +28,25 @@ if (!STRIPE_SECRET_KEY) {
   );
 }
 
+if (!PAYMENTO_API_KEY) {
+  console.warn(
+    "[server] PAYMENTO_API_KEY no está definida. Copia .env.example a .env y agrega tu clave de Paymento."
+  );
+}
+
+if (!PAYMENTO_IPN_SECRET) {
+  console.warn(
+    "[server] PAYMENTO_IPN_SECRET no está definida — no se podrá verificar la firma de los webhooks de Paymento."
+  );
+}
+
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+// El callback (IPN) de Paymento firma el body crudo con HMAC-SHA256 — hay
+// que guardarlo tal cual antes de que este middleware lo parsee a JSON.
+app.use(express.json({ verify: (req, _res, buf) => { req.rawBody = buf; } }));
 
 // Mantener en sync con src/lib/fees.ts
 const MIN_AMOUNT = 10;
@@ -205,11 +226,183 @@ app.post("/api/create-payment-intent", async (req, res) => {
   }
 });
 
-// --- Pago manual con USDC (Solana) ---------------------------------------
-// No verificamos la transacción on-chain (eso requeriría correr un nodo o
-// pagar un indexador RPC). El flujo es: el usuario manda USDC a la wallet
-// de la app, sube una captura como comprobante, y queda en revisión manual.
-const cryptoUpload = multer({
+// --- Pago con cripto vía Paymento -----------------------------------------
+// A diferencia del resto de métodos manuales de esta app, Paymento procesa
+// el pago en su checkout hospedado. Paymento solo da una `returnUrl` (no
+// distingue éxito de cancelación en la redirección) y su propia doc dice
+// que el redirect es solo informativo — la fuente de verdad es el webhook
+// (IPN, firmado con HMAC) más la API de verify, así que /api/order-status
+// llama a verify activamente en vez de esperar pasivamente el webhook (que
+// además no puede alcanzar un servidor en localhost). Como no hay base de
+// datos, el estado del pedido vive en memoria (se pierde si el servidor se
+// reinicia; suficiente para esta demo).
+const cryptoOrders = new Map();
+
+// https://api.paymento.io/v1/payment/verify — swagger: OrderStatus 0..9,
+// pero solo 7 (Paid) documentado como estado de éxito; 4 (Timeout),
+// 5 (UserCanceled) y 9 (Reject) como estados terminales de fallo. El resto
+// (0,1,2,3,8) se trata como "todavía procesando".
+function mapPaymentoStatus(orderStatus) {
+  if (orderStatus === 7) return "paid";
+  if ([4, 5, 9].includes(orderStatus)) return "failed";
+  return "pending";
+}
+
+async function verifyPaymentoOrder(token) {
+  const res = await fetch(`${PAYMENTO_API_BASE_URL}/v1/payment/verify`, {
+    method: "POST",
+    headers: { "Api-Key": PAYMENTO_API_KEY, "Content-Type": "application/json" },
+    body: JSON.stringify({ token }),
+  });
+  const data = await res.json();
+  if (!data.success) {
+    throw new Error(data.message || "No se pudo verificar el pago con Paymento.");
+  }
+  return data.body;
+}
+
+app.post("/api/create-crypto-session", async (req, res) => {
+  if (!PAYMENTO_API_KEY) {
+    return res.status(503).json({
+      error: "Paymento no está configurado en el servidor. Agrega PAYMENTO_API_KEY en tu archivo .env.",
+    });
+  }
+
+  const {
+    amount,
+    countryName,
+    deliveryMethod,
+    recipientName,
+    recipientPhone,
+    recipientEmail,
+    recipientReference,
+    recipientBank,
+    recipientAccountType,
+    recipientDocumentType,
+    recipientDocumentNumber,
+    recipientBankCode,
+    promoCode,
+  } = req.body ?? {};
+
+  if (typeof amount !== "number" || amount < MIN_AMOUNT || amount > MAX_AMOUNT) {
+    return res.status(400).json({
+      error: `El monto debe estar entre $${MIN_AMOUNT} y $${MAX_AMOUNT} USD.`,
+    });
+  }
+
+  const fee = getTransferFee(amount);
+  const total = Math.round((amount + fee) * 100) / 100;
+  const orderId = randomUUID();
+  const origin = `${req.protocol}://${req.get("host")}`;
+
+  try {
+    const paymentoRes = await fetch(`${PAYMENTO_API_BASE_URL}/v1/payment/request`, {
+      method: "POST",
+      headers: { "Api-Key": PAYMENTO_API_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fiatAmount: total.toFixed(2),
+        fiatCurrency: "USD",
+        returnUrl: `${origin}/?paymento=return&orderId=${orderId}`,
+        orderId,
+        riskSpeed: 1, // esperar confirmaciones antes de dar el pago por bueno
+      }),
+    });
+    const data = await paymentoRes.json();
+    if (!paymentoRes.ok || !data.success || !data.body) {
+      throw new Error(data.message || "Paymento rechazó la sesión de pago.");
+    }
+
+    const token = data.body;
+    cryptoOrders.set(orderId, {
+      status: "pending",
+      createdAt: Date.now(),
+      token,
+      amount,
+      fee,
+      total,
+      countryName: truncate(countryName),
+      deliveryMethod: truncate(deliveryMethod),
+      recipientName: truncate(recipientName),
+      recipientPhone: truncate(recipientPhone),
+      recipientEmail: truncate(recipientEmail),
+      recipientReference: truncate(recipientReference),
+      recipientBank: truncate(recipientBank),
+      recipientAccountType: truncate(recipientAccountType),
+      recipientDocumentType: truncate(recipientDocumentType),
+      recipientDocumentNumber: truncate(recipientDocumentNumber),
+      recipientBankCode: truncate(recipientBankCode),
+      promoCode: truncate(promoCode),
+    });
+
+    res.json({ orderId, paymentUrl: `${PAYMENTO_GATEWAY_BASE_URL}?token=${encodeURIComponent(token)}` });
+  } catch (err) {
+    console.error("[server] Error creando sesión de Paymento:", err.message);
+    res.status(500).json({ error: "No se pudo iniciar el pago con Paymento. Intenta de nuevo." });
+  }
+});
+
+// Paymento llama a esta URL server-to-server (IPN) cuando el estado del
+// pago cambia. Hay que configurarla manualmente como "IPN URL" en el
+// dashboard de Paymento apuntando a "<tu dominio>/api/paymento-webhook" —
+// la API de creación de sesión no acepta una URL de callback por request.
+app.post("/api/paymento-webhook", (req, res) => {
+  if (PAYMENTO_IPN_SECRET) {
+    const signature = req.get("X-HMAC-SHA256-SIGNATURE");
+    const expected = req.rawBody
+      ? createHmac("sha256", PAYMENTO_IPN_SECRET).update(req.rawBody).digest("hex").toUpperCase()
+      : null;
+    if (!signature || !expected || signature.toUpperCase() !== expected) {
+      console.warn("[server] Webhook de Paymento con firma inválida, se ignora.");
+      return res.status(401).json({ error: "Firma inválida." });
+    }
+  }
+
+  const { OrderId, OrderStatus } = req.body ?? {};
+  const order = OrderId ? cryptoOrders.get(OrderId) : null;
+  if (!order) {
+    console.warn("[server] Webhook de Paymento con orderId desconocido:", OrderId);
+    return res.status(200).json({ received: true });
+  }
+
+  order.status = mapPaymentoStatus(Number(OrderStatus));
+  cryptoOrders.set(OrderId, order);
+  console.log(`[server] Webhook Paymento: pedido ${OrderId} → ${order.status}`);
+
+  res.status(200).json({ received: true });
+});
+
+app.get("/api/order-status/:orderId", async (req, res) => {
+  const order = cryptoOrders.get(req.params.orderId);
+  if (!order) {
+    return res.status(404).json({ error: "Pedido no encontrado." });
+  }
+
+  // El webhook puede no llegar nunca en desarrollo local (Paymento no puede
+  // alcanzar localhost), así que además de esperarlo, consultamos verify
+  // activamente mientras el pedido siga pendiente.
+  if (order.status === "pending" && PAYMENTO_API_KEY) {
+    try {
+      const verified = await verifyPaymentoOrder(order.token);
+      order.status = mapPaymentoStatus(Number(verified.orderStatus));
+      cryptoOrders.set(req.params.orderId, order);
+    } catch (err) {
+      console.warn("[server] No se pudo verificar el pedido con Paymento:", err.message);
+    }
+  }
+
+  res.json({
+    status: order.status,
+    amount: order.amount,
+    fee: order.fee,
+    total: order.total,
+    countryName: order.countryName,
+    deliveryMethod: order.deliveryMethod,
+    recipientName: order.recipientName,
+    recipientReference: order.recipientReference,
+  });
+});
+
+const proofUpload = multer({
   storage: multer.diskStorage({
     destination: uploadsDir,
     filename: (_req, file, cb) => {
@@ -226,60 +419,12 @@ const cryptoUpload = multer({
   },
 });
 
-app.post("/api/crypto-payment", cryptoUpload.single("proof"), (req, res) => {
-  const {
-    amount,
-    countryName,
-    deliveryMethod,
-    recipientName,
-    recipientPhone,
-    recipientEmail,
-    recipientReference,
-    recipientBank,
-    recipientAccountType,
-    recipientDocumentType,
-    recipientDocumentNumber,
-    recipientBankCode,
-  } = req.body ?? {};
-
-  const amountNum = Number(amount);
-  if (!Number.isFinite(amountNum) || amountNum < MIN_AMOUNT || amountNum > MAX_AMOUNT) {
-    return res.status(400).json({
-      error: `El monto debe estar entre $${MIN_AMOUNT} y $${MAX_AMOUNT} USD.`,
-    });
-  }
-  if (!req.file) {
-    return res.status(400).json({ error: "Adjunta una captura del pago para continuar." });
-  }
-
-  const fee = getTransferFee(amountNum);
-  const total = Math.round((amountNum + fee) * 100) / 100;
-  const reference = randomUUID();
-
-  console.log(
-    `[server] Pago con USDC pendiente de revisión ${reference}: $${total} · ${truncate(recipientName)} · ${truncate(countryName)} · comprobante ${req.file.filename}`,
-    {
-      deliveryMethod: truncate(deliveryMethod),
-      recipientPhone: truncate(recipientPhone),
-      recipientEmail: truncate(recipientEmail),
-      recipientReference: truncate(recipientReference),
-      recipientBank: truncate(recipientBank),
-      recipientAccountType: truncate(recipientAccountType),
-      recipientDocumentType: truncate(recipientDocumentType),
-      recipientDocumentNumber: truncate(recipientDocumentNumber),
-      recipientBankCode: truncate(recipientBankCode),
-    }
-  );
-
-  res.json({ reference, status: "pending_review", fee, total });
-});
-
 // --- Pago manual por transferencia bancaria europea ----------------------
 // Para remitentes en Europa que no tienen tarjeta o cuenta de EE.UU. para
 // pagar vía Stripe: transfieren a la cuenta receptora de Lukea (IBAN/SWIFT
-// en Reino Unido) y suben comprobante, igual que el flujo de USDC — sin
-// verificación automática, queda pendiente de revisión manual.
-app.post("/api/eu-bank-transfer", cryptoUpload.single("proof"), (req, res) => {
+// en Reino Unido) y suben comprobante — sin verificación automática, queda
+// pendiente de revisión manual.
+app.post("/api/eu-bank-transfer", proofUpload.single("proof"), (req, res) => {
   const {
     amount,
     countryName,
@@ -348,6 +493,7 @@ app.get("/api/health", (_req, res) => {
   res.json({
     ok: true,
     stripeConfigured: Boolean(stripe),
+    paymentoConfigured: Boolean(PAYMENTO_API_KEY),
     ratesCached: Boolean(ratesCache.data),
     ratesFetchedAt: ratesCache.fetchedAt ? new Date(ratesCache.fetchedAt).toISOString() : null,
   });

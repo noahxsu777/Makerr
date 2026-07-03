@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   BadgeCheck,
@@ -19,7 +19,40 @@ import { getFallbackRate } from "../lib/rates";
 import { useLiveRates } from "../lib/useLiveRates";
 import AnimatedNumber from "./AnimatedNumber";
 import CheckoutModal from "./CheckoutModal";
+import { CRYPTO_ORDER_STORAGE_KEY, type CryptoOrderContext } from "./CryptoPayment";
 import RelativeTime from "./RelativeTime";
+
+type ResumeState = {
+  orderId: string;
+  context: CryptoOrderContext;
+};
+
+// Al volver del checkout hospedado de Paymento (ver CryptoPayment.tsx), la
+// navegación completa recarga la página y pierde todo el estado de React —
+// por eso el contexto del pedido se guardó en sessionStorage antes de salir,
+// y acá se recupera leyendo el query param que Paymento agrega al volver.
+// Paymento solo da una `returnUrl` (no distingue éxito de cancelación en la
+// redirección — su propia doc dice que hay que confirmar con el webhook +
+// verify), así que siempre se resume hacia el paso "confirmando" y el
+// resultado real (pagado o no) lo decide el polling a /api/order-status.
+function readPaymentoResume(): ResumeState | null {
+  const params = new URLSearchParams(window.location.search);
+  const orderId = params.get("orderId");
+  if (params.get("paymento") !== "return" || !orderId) return null;
+
+  const raw = window.sessionStorage.getItem(CRYPTO_ORDER_STORAGE_KEY);
+  window.sessionStorage.removeItem(CRYPTO_ORDER_STORAGE_KEY);
+  window.history.replaceState({}, "", window.location.pathname);
+  if (!raw) return null;
+
+  try {
+    const context: CryptoOrderContext = JSON.parse(raw);
+    if (context.orderId !== orderId) return null;
+    return { orderId, context };
+  } catch {
+    return null;
+  }
+}
 
 function getRate(country: Country, liveRates: Record<string, number> | null): number {
   if (country.currency === "USD") return 1;
@@ -37,6 +70,16 @@ export default function Calculator() {
   const [countryIdx, setCountryIdx] = useState(0);
   const [deliveryIdx, setDeliveryIdx] = useState(0);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [resume, setResume] = useState<ResumeState | null>(null);
+
+  useEffect(() => {
+    const resumed = readPaymentoResume();
+    if (resumed) {
+      setResume(resumed);
+      setCheckoutOpen(true);
+    }
+  }, []);
+
   const country = countries[countryIdx];
   const delivery = deliverySpeeds[deliveryIdx];
   const {
@@ -376,14 +419,27 @@ export default function Calculator() {
 
       <CheckoutModal
         open={checkoutOpen}
-        onClose={() => setCheckoutOpen(false)}
-        amountUsd={amount}
-        feeUsd={fee}
-        totalUsd={total}
-        receivedAmount={received}
-        country={country}
-        deliveryLabel={delivery.label}
-        promoCode={appliedPromo?.code}
+        onClose={() => {
+          setCheckoutOpen(false);
+          setResume(null);
+        }}
+        amountUsd={resume?.context.amountUsd ?? amount}
+        feeUsd={resume?.context.feeUsd ?? fee}
+        totalUsd={resume?.context.totalUsd ?? total}
+        receivedAmount={resume?.context.receivedAmount ?? received}
+        country={
+          resume
+            ? {
+                name: resume.context.countryName,
+                flag: resume.context.countryFlag,
+                currency: resume.context.currency,
+              }
+            : country
+        }
+        deliveryLabel={resume?.context.deliveryLabel ?? delivery.label}
+        promoCode={resume?.context.promoCode ?? appliedPromo?.code}
+        resumeOrderId={resume?.orderId}
+        resumeRecipient={resume?.context.recipient}
       />
     </section>
   );
