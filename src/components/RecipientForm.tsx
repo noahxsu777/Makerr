@@ -10,74 +10,129 @@ export type Recipient = {
   accountType: string;
   documentType: string;
   documentNumber: string;
+  bankCode: string;
 };
 
 type Props = {
   countryName: string;
+  currency: string;
   deliveryLabel: string;
   initialValues: Recipient;
   onSubmit: (recipient: Recipient) => void;
 };
 
-const colombiaDocumentTypes = [
+type DocumentTypeOption = { value: string; label: string };
+
+const colombiaDocumentTypes: DocumentTypeOption[] = [
   { value: "CC", label: "Cédula de ciudadanía" },
   { value: "CE", label: "Cédula de extranjería" },
   { value: "NIT", label: "NIT" },
   { value: "PA", label: "Pasaporte" },
 ];
 
-function referenceFieldConfig(countryName: string, deliveryLabel: string) {
+const argentinaDocumentTypes: DocumentTypeOption[] = [
+  { value: "DNI", label: "DNI" },
+  { value: "CUIT", label: "CUIT" },
+  { value: "CUIL", label: "CUIL" },
+];
+
+const brasilDocumentTypes: DocumentTypeOption[] = [{ value: "CPF", label: "CPF" }];
+
+type BankDepositConfig = {
+  label: string;
+  placeholder: string;
+  maxLength?: number;
+  showBank: boolean;
+  showAccountType?: boolean;
+  documentTypes?: DocumentTypeOption[];
+  extraField?: { label: string; placeholder: string; maxLength?: number };
+};
+
+// Formatos de cuenta bancaria por país destino: cada red bancaria pide un
+// identificador distinto para que el depósito llegue a la cuenta correcta.
+const BANK_DEPOSIT_CONFIG: Record<string, BankDepositConfig> = {
+  Perú: {
+    label: "CCI (Código de Cuenta Interbancaria)",
+    placeholder: "20 dígitos",
+    maxLength: 20,
+    showBank: true,
+  },
+  México: {
+    label: "CLABE interbancaria",
+    placeholder: "18 dígitos",
+    maxLength: 18,
+    showBank: true,
+  },
+  Colombia: {
+    label: "Número de cuenta bancaria",
+    placeholder: "0123 4567 8901",
+    showBank: true,
+    showAccountType: true,
+    documentTypes: colombiaDocumentTypes,
+  },
+  Argentina: {
+    label: "CBU (Clave Bancaria Uniforme)",
+    placeholder: "22 dígitos",
+    maxLength: 22,
+    showBank: false,
+    documentTypes: argentinaDocumentTypes,
+  },
+  Brasil: {
+    label: "Número de cuenta (agência + conta)",
+    placeholder: "1234 / 56789-0",
+    showBank: true,
+    documentTypes: brasilDocumentTypes,
+  },
+  India: {
+    label: "Número de cuenta bancaria",
+    placeholder: "0123456789012",
+    showBank: true,
+    extraField: {
+      label: "Código IFSC",
+      placeholder: "SBIN0001234",
+      maxLength: 11,
+    },
+  },
+};
+
+const EU_BANK_DEPOSIT_CONFIG: BankDepositConfig = {
+  label: "IBAN",
+  placeholder: "ES91 2100 0418 4502 0005 1332",
+  maxLength: 34,
+  showBank: false,
+  extraField: {
+    label: "Código BIC / SWIFT",
+    placeholder: "BBVAESMMXXX",
+    maxLength: 11,
+  },
+};
+
+const DEFAULT_BANK_DEPOSIT_CONFIG: BankDepositConfig = {
+  label: "Número de cuenta bancaria",
+  placeholder: "0123 4567 8901 2345",
+  showBank: true,
+};
+
+function referenceFieldConfig(
+  countryName: string,
+  currency: string,
+  deliveryLabel: string
+): BankDepositConfig {
   if (deliveryLabel === "Depósito bancario") {
-    if (countryName === "Perú") {
-      return {
-        label: "CCI (Código de Cuenta Interbancaria)",
-        placeholder: "20 dígitos",
-        maxLength: 20,
-        showBank: true,
-        showColombiaFields: false,
-      };
-    }
-    if (countryName === "México") {
-      return {
-        label: "CLABE interbancaria",
-        placeholder: "18 dígitos",
-        maxLength: 18,
-        showBank: true,
-        showColombiaFields: false,
-      };
-    }
-    if (countryName === "Colombia") {
-      return {
-        label: "Número de cuenta bancaria",
-        placeholder: "0123 4567 8901",
-        maxLength: undefined,
-        showBank: true,
-        showColombiaFields: true,
-      };
-    }
-    return {
-      label: "Número de cuenta bancaria",
-      placeholder: "0123 4567 8901 2345",
-      maxLength: undefined,
-      showBank: true,
-      showColombiaFields: false,
-    };
+    if (currency === "EUR") return EU_BANK_DEPOSIT_CONFIG;
+    return BANK_DEPOSIT_CONFIG[countryName] ?? DEFAULT_BANK_DEPOSIT_CONFIG;
   }
   if (deliveryLabel === "Retiro en efectivo") {
     return {
       label: "Documento de identidad del destinatario",
       placeholder: "CURP / cédula / DNI",
-      maxLength: undefined,
       showBank: false,
-      showColombiaFields: false,
     };
   }
   return {
     label: "Número de la billetera móvil",
     placeholder: "+52 55 1234 5678",
-    maxLength: undefined,
     showBank: false,
-    showColombiaFields: false,
   };
 }
 
@@ -89,19 +144,23 @@ const selectClasses =
 
 export default function RecipientForm({
   countryName,
+  currency,
   deliveryLabel,
   initialValues,
   onSubmit,
 }: Props) {
   const [values, setValues] = useState<Recipient>(initialValues);
-  const field = referenceFieldConfig(countryName, deliveryLabel);
+  const field = referenceFieldConfig(countryName, currency, deliveryLabel);
+  const documentTypes = field.documentTypes;
 
   const update = (key: keyof Recipient) => (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setValues((v) => ({ ...v, [key]: e.target.value }));
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
-    onSubmit(values);
+    const fixedDocumentType =
+      documentTypes && documentTypes.length === 1 ? documentTypes[0].value : values.documentType;
+    onSubmit({ ...values, documentType: fixedDocumentType });
   };
 
   return (
@@ -155,25 +214,34 @@ export default function RecipientForm({
         </div>
       )}
 
-      {field.showColombiaFields && (
+      {documentTypes && (
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="relative">
             <IdCard size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30" />
-            <select
-              required
-              value={values.documentType}
-              onChange={update("documentType")}
-              className={selectClasses}
-            >
-              <option value="" disabled>
-                Tipo de documento
-              </option>
-              {colombiaDocumentTypes.map((d) => (
-                <option key={d.value} value={d.value}>
-                  {d.label}
+            {documentTypes.length > 1 ? (
+              <select
+                required
+                value={values.documentType}
+                onChange={update("documentType")}
+                className={selectClasses}
+              >
+                <option value="" disabled>
+                  Tipo de documento
                 </option>
-              ))}
-            </select>
+                {documentTypes.map((d) => (
+                  <option key={d.value} value={d.value}>
+                    {d.label}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                required
+                readOnly
+                value={documentTypes[0].label}
+                className={`${inputClasses} cursor-default text-white/60`}
+              />
+            )}
           </div>
           <div className="relative">
             <Hash size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30" />
@@ -185,21 +253,23 @@ export default function RecipientForm({
               className={inputClasses}
             />
           </div>
-          <div className="relative sm:col-span-2">
-            <Landmark size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30" />
-            <select
-              required
-              value={values.accountType}
-              onChange={update("accountType")}
-              className={selectClasses}
-            >
-              <option value="" disabled>
-                Tipo de cuenta
-              </option>
-              <option value="Ahorros">Ahorros</option>
-              <option value="Corriente">Corriente</option>
-            </select>
-          </div>
+          {field.showAccountType && (
+            <div className="relative sm:col-span-2">
+              <Landmark size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30" />
+              <select
+                required
+                value={values.accountType}
+                onChange={update("accountType")}
+                className={selectClasses}
+              >
+                <option value="" disabled>
+                  Tipo de cuenta
+                </option>
+                <option value="Ahorros">Ahorros</option>
+                <option value="Corriente">Corriente</option>
+              </select>
+            </div>
+          )}
         </div>
       )}
 
@@ -220,6 +290,25 @@ export default function RecipientForm({
           />
         </div>
       </div>
+
+      {field.extraField && (
+        <div>
+          <label className="mb-1.5 block text-xs font-medium text-white/45">
+            {field.extraField.label}
+          </label>
+          <div className="relative">
+            <Hash size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-white/30" />
+            <input
+              required
+              value={values.bankCode}
+              onChange={update("bankCode")}
+              placeholder={field.extraField.placeholder}
+              maxLength={field.extraField.maxLength}
+              className={inputClasses}
+            />
+          </div>
+        </div>
+      )}
 
       <button
         type="submit"

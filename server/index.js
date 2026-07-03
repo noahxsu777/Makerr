@@ -84,6 +84,7 @@ const SUPPORTED_CURRENCIES = [
   "PHP",
   "INR",
   "VND",
+  "EUR",
 ];
 
 let ratesCache = { data: null, fetchedAt: 0 };
@@ -163,6 +164,7 @@ app.post("/api/create-payment-intent", async (req, res) => {
     recipientAccountType,
     recipientDocumentType,
     recipientDocumentNumber,
+    recipientBankCode,
   } = req.body ?? {};
 
   if (typeof amount !== "number" || amount < MIN_AMOUNT || amount > MAX_AMOUNT) {
@@ -192,6 +194,7 @@ app.post("/api/create-payment-intent", async (req, res) => {
         recipientAccountType: truncate(recipientAccountType),
         recipientDocumentType: truncate(recipientDocumentType),
         recipientDocumentNumber: truncate(recipientDocumentNumber),
+        recipientBankCode: truncate(recipientBankCode),
       },
     });
 
@@ -236,6 +239,7 @@ app.post("/api/crypto-payment", cryptoUpload.single("proof"), (req, res) => {
     recipientAccountType,
     recipientDocumentType,
     recipientDocumentNumber,
+    recipientBankCode,
   } = req.body ?? {};
 
   const amountNum = Number(amount);
@@ -263,6 +267,60 @@ app.post("/api/crypto-payment", cryptoUpload.single("proof"), (req, res) => {
       recipientAccountType: truncate(recipientAccountType),
       recipientDocumentType: truncate(recipientDocumentType),
       recipientDocumentNumber: truncate(recipientDocumentNumber),
+      recipientBankCode: truncate(recipientBankCode),
+    }
+  );
+
+  res.json({ reference, status: "pending_review", fee, total });
+});
+
+// --- Pago manual por transferencia bancaria europea ----------------------
+// Para remitentes en Europa que no tienen tarjeta o cuenta de EE.UU. para
+// pagar vía Stripe: transfieren a la cuenta receptora de Lukea (IBAN/SWIFT
+// en Reino Unido) y suben comprobante, igual que el flujo de USDC — sin
+// verificación automática, queda pendiente de revisión manual.
+app.post("/api/eu-bank-transfer", cryptoUpload.single("proof"), (req, res) => {
+  const {
+    amount,
+    countryName,
+    deliveryMethod,
+    recipientName,
+    recipientPhone,
+    recipientEmail,
+    recipientReference,
+    recipientBank,
+    recipientAccountType,
+    recipientDocumentType,
+    recipientDocumentNumber,
+    recipientBankCode,
+  } = req.body ?? {};
+
+  const amountNum = Number(amount);
+  if (!Number.isFinite(amountNum) || amountNum < MIN_AMOUNT || amountNum > MAX_AMOUNT) {
+    return res.status(400).json({
+      error: `El monto debe estar entre $${MIN_AMOUNT} y $${MAX_AMOUNT} USD.`,
+    });
+  }
+  if (!req.file) {
+    return res.status(400).json({ error: "Adjunta un comprobante de la transferencia para continuar." });
+  }
+
+  const fee = getTransferFee(amountNum);
+  const total = Math.round((amountNum + fee) * 100) / 100;
+  const reference = randomUUID();
+
+  console.log(
+    `[server] Transferencia bancaria europea pendiente de revisión ${reference}: $${total} · ${truncate(recipientName)} · ${truncate(countryName)} · comprobante ${req.file.filename}`,
+    {
+      deliveryMethod: truncate(deliveryMethod),
+      recipientPhone: truncate(recipientPhone),
+      recipientEmail: truncate(recipientEmail),
+      recipientReference: truncate(recipientReference),
+      recipientBank: truncate(recipientBank),
+      recipientAccountType: truncate(recipientAccountType),
+      recipientDocumentType: truncate(recipientDocumentType),
+      recipientDocumentNumber: truncate(recipientDocumentNumber),
+      recipientBankCode: truncate(recipientBankCode),
     }
   );
 

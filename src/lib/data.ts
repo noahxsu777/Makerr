@@ -18,6 +18,11 @@ export const countries = [
   { name: "Filipinas", flag: "🇵🇭", currency: "PHP" },
   { name: "India", flag: "🇮🇳", currency: "INR" },
   { name: "Vietnam", flag: "🇻🇳", currency: "VND" },
+  { name: "España", flag: "🇪🇸", currency: "EUR" },
+  { name: "Italia", flag: "🇮🇹", currency: "EUR" },
+  { name: "Francia", flag: "🇫🇷", currency: "EUR" },
+  { name: "Alemania", flag: "🇩🇪", currency: "EUR" },
+  { name: "Portugal", flag: "🇵🇹", currency: "EUR" },
 ] as const;
 
 export type Country = (typeof countries)[number];
@@ -138,7 +143,7 @@ export const faqs = [
   },
   {
     q: "¿A cuántos países puedo enviar?",
-    a: "Actualmente cubrimos 22 países en Latinoamérica y Asia, con más de 8 formas de entrega distintas según el país de destino.",
+    a: "Actualmente cubrimos 21 países en Latinoamérica, Asia y la Unión Europea, con más de 8 formas de entrega distintas según el país de destino.",
   },
   {
     q: "¿Es seguro dar mis datos bancarios?",
@@ -156,7 +161,7 @@ export const faqs = [
 
 export const stats = [
   { label: "Familias conectadas", value: 480_000, suffix: "+" },
-  { label: "Países de destino", value: 22, suffix: "" },
+  { label: "Países de destino", value: 21, suffix: "" },
   { label: "Formas de entrega", value: 8, suffix: "" },
   { label: "Calificación en tiendas", value: 4.9, suffix: "/5" },
 ] as const;

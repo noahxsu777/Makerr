@@ -57,7 +57,7 @@ export default function Hero() {
             className="mt-6 max-w-lg text-lg leading-relaxed text-white/60"
           >
             Una remesadora con mejor diseño, mejores tasas y 8 formas de
-            entrega en 22 países. Sin comisiones escondidas, sin filas, sin
+            entrega en 21 países. Sin comisiones escondidas, sin filas, sin
             estrés.
           </motion.p>
 
