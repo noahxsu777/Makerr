@@ -363,10 +363,50 @@ app.post("/api/stripe-webhook", async (req, res) => {
 // que el redirect es solo informativo — la fuente de verdad es el webhook
 // (IPN, firmado con HMAC) más la API de verify, así que /api/order-status
 // llama a verify activamente en vez de esperar pasivamente el webhook (que
-// además no puede alcanzar un servidor en localhost). El estado vive en la
-// base de datos (no en memoria): en Vercel cada invocación puede caer en
-// una instancia distinta, así que un Map en memoria no sería confiable.
+// además no puede alcanzar un servidor en localhost).
 //
+// El estado del pedido se guarda en la base de datos cuando está
+// conectada (confiable entre invocaciones de Vercel); si no hay DB
+// configurada todavía, cae a un Map en memoria para que el método siga
+// funcionando igual que antes de tener base de datos (menos confiable en
+// serverless, pero mejor que bloquear el pago por completo).
+const cryptoOrdersMemory = new Map();
+
+async function saveCryptoOrder(shipment) {
+  if (isDbConfigured) {
+    await insertShipment(shipment);
+    return;
+  }
+  cryptoOrdersMemory.set(shipment.id, shipment);
+}
+
+async function getCryptoOrder(id) {
+  if (isDbConfigured) return getShipment(id);
+  const order = cryptoOrdersMemory.get(id);
+  if (!order) return null;
+  return {
+    id: order.id,
+    status: order.status,
+    paymento_token: order.paymentoToken,
+    amount: order.amount,
+    fee: order.fee,
+    total: order.total,
+    country_name: order.countryName,
+    delivery_method: order.deliveryMethod,
+    recipient_name: order.recipientName,
+    recipient_reference: order.recipientReference,
+  };
+}
+
+async function updateCryptoOrderStatus(id, status) {
+  if (isDbConfigured) {
+    await updateShipmentStatus(id, status);
+    return;
+  }
+  const order = cryptoOrdersMemory.get(id);
+  if (order) order.status = status;
+}
+
 // https://api.paymento.io/v1/payment/verify — swagger: OrderStatus 0..9,
 // pero solo 7 (Paid) documentado como estado de éxito; 4 (Timeout),
 // 5 (UserCanceled) y 9 (Reject) como estados terminales de fallo. El resto
@@ -394,11 +434,6 @@ app.post("/api/create-crypto-session", async (req, res) => {
   if (!PAYMENTO_API_KEY) {
     return res.status(503).json({
       error: "Paymento no está configurado en el servidor. Agrega PAYMENTO_API_KEY en tu archivo .env.",
-    });
-  }
-  if (!isDbConfigured) {
-    return res.status(503).json({
-      error: "La base de datos no está configurada. Agrega DATABASE_URL en tu archivo .env para poder rastrear pagos con cripto.",
     });
   }
 
@@ -458,7 +493,7 @@ app.post("/api/create-crypto-session", async (req, res) => {
     }
 
     const token = data.body;
-    await insertShipment({
+    await saveCryptoOrder({
       id: orderId,
       paymentMethod: "crypto",
       status: "pending",
@@ -508,7 +543,7 @@ app.post("/api/paymento-webhook", async (req, res) => {
 
   const { OrderId, OrderStatus } = req.body ?? {};
   if (OrderId) {
-    await markShipmentStatus(OrderId, mapPaymentoStatus(Number(OrderStatus)));
+    await updateCryptoOrderStatus(OrderId, mapPaymentoStatus(Number(OrderStatus)));
     console.log(`[server] Webhook Paymento: pedido ${OrderId} → ${mapPaymentoStatus(Number(OrderStatus))}`);
   }
 
@@ -516,13 +551,9 @@ app.post("/api/paymento-webhook", async (req, res) => {
 });
 
 app.get("/api/order-status/:orderId", async (req, res) => {
-  if (!isDbConfigured) {
-    return res.status(503).json({ error: "La base de datos no está configurada." });
-  }
-
   let shipment;
   try {
-    shipment = await getShipment(req.params.orderId);
+    shipment = await getCryptoOrder(req.params.orderId);
   } catch (err) {
     console.error("[server] Error consultando el pedido:", err.message);
     return res.status(500).json({ error: "No se pudo consultar el pedido." });
@@ -539,7 +570,7 @@ app.get("/api/order-status/:orderId", async (req, res) => {
       const verified = await verifyPaymentoOrder(shipment.paymento_token);
       const nextStatus = mapPaymentoStatus(Number(verified.orderStatus));
       if (nextStatus !== shipment.status) {
-        await updateShipmentStatus(shipment.id, nextStatus);
+        await updateCryptoOrderStatus(shipment.id, nextStatus);
         shipment.status = nextStatus;
       }
     } catch (err) {
