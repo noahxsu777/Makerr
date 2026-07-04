@@ -1,16 +1,53 @@
 import { neon } from "@neondatabase/serverless";
 
 // Vercel inyecta esto solo cuando conectas una base de datos (Neon/Postgres)
-// desde la pestaña "Storage" de tu proyecto — sin eso, sql queda null y cada
-// función de acá tira un error claro en vez de intentar conectar a nada.
-const DATABASE_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL;
-export const isDbConfigured = Boolean(DATABASE_URL);
-const sql = DATABASE_URL ? neon(DATABASE_URL) : null;
+// desde la pestaña "Storage" de tu proyecto — el nombre exacto de la
+// variable varía según cómo se conectó (integración nativa de Neon vs. el
+// viejo "Vercel Postgres"), así que probamos todos los nombres conocidos en
+// vez de asumir uno solo. Sin ninguno, sql queda null y cada función de acá
+// tira un error claro en vez de intentar conectar a nada.
+const DB_URL_CANDIDATES = [
+  "DATABASE_URL",
+  "POSTGRES_URL",
+  "POSTGRES_PRISMA_URL",
+  "DATABASE_URL_UNPOOLED",
+  "POSTGRES_URL_NON_POOLING",
+];
+const matchedVarName = DB_URL_CANDIDATES.find((name) => process.env[name]);
+const DATABASE_URL = matchedVarName ? process.env[matchedVarName] : undefined;
+
+// neon() valida el formato de la cadena de conexión de forma síncrona y
+// TIRA (throw) si no le gusta — como este módulo se importa una sola vez
+// por invocación serverless, un connection string mal formado tumbaría
+// *toda* la función (todas las rutas de /api/*, no solo las de la base de
+// datos). Por eso va envuelto en try/catch: si falla, se degrada a "sin
+// base de datos" en vez de romper el resto de la app.
+let sql = null;
+let dbInitError = null;
+if (DATABASE_URL) {
+  try {
+    sql = neon(DATABASE_URL);
+  } catch (err) {
+    dbInitError = err.message;
+    console.error(
+      `[db] No se pudo inicializar la conexión a Postgres (variable ${matchedVarName}): ${err.message}`
+    );
+  }
+}
+
+export const isDbConfigured = Boolean(sql);
+// Solo el NOMBRE de la variable que se usó (y el error de init si lo hubo),
+// nunca el valor — sirve para diagnosticar desde /api/health sin exponer
+// la cadena de conexión.
+export const dbUrlSource = matchedVarName ?? null;
+export const dbInitErrorMessage = dbInitError;
 
 function requireSql() {
   if (!sql) {
     throw new Error(
-      "No hay base de datos conectada. Agrega DATABASE_URL (o conecta un Postgres de Neon desde Vercel → Storage)."
+      dbInitError
+        ? `La conexión a la base de datos falló al iniciar: ${dbInitError}`
+        : "No hay base de datos conectada. Agrega DATABASE_URL (o conecta un Postgres de Neon desde Vercel → Storage)."
     );
   }
   return sql;
