@@ -14,6 +14,8 @@ import {
   getShipment,
   updateShipment,
   isDbConfigured,
+  dbUrlSource,
+  dbInitErrorMessage,
 } from "./db.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -757,6 +759,8 @@ app.get("/api/health", (_req, res) => {
     stripeConfigured: Boolean(stripe),
     paymentoConfigured: Boolean(PAYMENTO_API_KEY),
     dbConfigured: isDbConfigured,
+    dbUrlSource,
+    dbInitError: dbInitErrorMessage,
     adminConfigured: Boolean(ADMIN_PASSWORD),
     ratesCached: Boolean(ratesCache.data),
     ratesFetchedAt: ratesCache.fetchedAt ? new Date(ratesCache.fetchedAt).toISOString() : null,
